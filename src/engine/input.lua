@@ -96,7 +96,7 @@ Input.mouse_released = {}
 
 Input.order = {
     "down", "right", "up", "left", "confirm", "cancel", "menu", "console", "debug_menu", "object_selector",
-    "fast_forward", "mod_rebind"
+    "fast_forward", "editor", "editor_view", "mod_rebind"
 }
 
 Input.required_binds = {
@@ -222,6 +222,8 @@ function Input.resetBinds(gamepad, mod_id)
             ["debug_menu"] = { { "shift", "`" } },
             ["object_selector"] = { { "ctrl", "o" } },
             ["fast_forward"] = { { "ctrl", "g" } },
+            ["editor"] = { "f10" },
+            ["editor_view"] = { "tab" },
             ["mod_rebind"] = { "/" },
         }
         local gamepad_bindings = {
@@ -236,6 +238,8 @@ function Input.resetBinds(gamepad, mod_id)
             ["debug_menu"] = {},
             ["object_selector"] = {},
             ["fast_forward"] = {},
+            ["editor"] = {},
+            ["editor_view"] = {},
             ["mod_rebind"] = { "gamepad:x" },
         }
         if gamepad ~= true then TableUtils.merge(Input.key_bindings, key_bindings) end
@@ -287,6 +291,8 @@ function Input.resetBinds(gamepad, mod_id)
             ["debug_menu"] = { { "shift", "`" } },
             ["object_selector"] = { { "ctrl", "o" } },
             ["fast_forward"] = { { "ctrl", "g" } },
+            ["editor"] = { "f10" },
+            ["editor_view"] = { "tab" },
             ["mod_rebind"] = { "/" },
         }
         for _, mod in ipairs(Kristal.Mods.getMods()) do
@@ -333,6 +339,8 @@ function Input.resetBinds(gamepad, mod_id)
             ["debug_menu"] = {},
             ["object_selector"] = {},
             ["fast_forward"] = {},
+            ["editor"] = {},
+            ["editor_view"] = {},
             ["mod_rebind"] = { "gamepad:x" },
         }
         for _, mod in ipairs(Kristal.Mods.getMods()) do

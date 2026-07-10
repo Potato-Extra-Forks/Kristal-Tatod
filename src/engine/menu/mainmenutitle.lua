@@ -35,6 +35,7 @@ function MainMenuTitle:onEnter(old_state)
     if TARGET_MOD then
         self.options = {
             { "play", self.has_target_saves and "Load game" or "Start game" },
+            { "editor", "Editor" },
             { "options", "Options" },
             { "credits", "Credits" },
             { "quit", "Quit" },
@@ -42,6 +43,7 @@ function MainMenuTitle:onEnter(old_state)
     else
         self.options = {
             { "play", "Play" },
+            { "editor", "Editor" },
             { "modfolder", "Open folder" },
             { "options", "Options" },
             { "credits", "Credits" },
@@ -71,6 +73,7 @@ function MainMenuTitle:onKeyPressed(key, is_repeat)
         local option = self.options[self.selected_option][1]
 
         if option == "play" then
+            self.menu.editor_project_selection = false
             if not TARGET_MOD then
                 self.menu:setState("MODSELECT")
             else
@@ -83,6 +86,16 @@ function MainMenuTitle:onKeyPressed(key, is_repeat)
                         error("Failed to load mod: " .. TARGET_MOD)
                     end
                 end
+            end
+
+        elseif option == "editor" then
+            if TARGET_MOD then
+                if not Kristal.loadModIntoEditor(TARGET_MOD) then
+                    error("Failed to load mod for editor: " .. TARGET_MOD)
+                end
+            else
+                self.menu.editor_project_selection = true
+                self.menu:setState("MODSELECT")
             end
 
         elseif option == "modfolder" then

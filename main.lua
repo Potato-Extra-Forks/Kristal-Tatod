@@ -46,6 +46,8 @@ Draw = require("src.utils.draw")
 Kristal = require("src.kristal")
 -- Ease of access for game variables
 Game = Kristal.States["Game"]
+Editor = Kristal.States["Editor"]
+EditorTransitionState = Kristal.States["EditorTransition"]
 MainMenu = Kristal.States["MainMenu"]
 LoadingState = Kristal.States["Loading"]
 
@@ -328,6 +330,29 @@ ArrowListMenuItemComponent = require("src.engine.ui.components.arrowlistmenuitem
 IntegerMenuItemComponent = require("src.engine.ui.components.integermenuitem")
 ArrowIntegerMenuItemComponent = require("src.engine.ui.components.arrowintegermenuitem")
 LabelMenuItemComponent = require("src.engine.ui.components.labelmenuitem")
+
+-- EDITOR UI SYSTEM
+EditorFont = require("src.engine.editor.editorfont")
+EditorControl = require("src.engine.editor.ui.control")
+EditorTextInput = require("src.engine.editor.ui.controls.textinput")
+EditorButton = require("src.engine.editor.ui.controls.button")
+EditorCheckbox = require("src.engine.editor.ui.controls.checkbox")
+EditorToggle = require("src.engine.editor.ui.controls.toggle")
+EditorScrollbar = require("src.engine.editor.ui.controls.scrollbar")
+EditorSearchBar = require("src.engine.editor.ui.controls.searchbar")
+EditorItemList = require("src.engine.editor.ui.controls.itemlist")
+EditorTreeList = require("src.engine.editor.ui.controls.treelist")
+EditorPanel = require("src.engine.editor.ui.panel")
+EditorDockStack = require("src.engine.editor.ui.dockstack")
+EditorDockSpace = require("src.engine.editor.ui.dockspace")
+EditorMapDocument = require("src.engine.editor.mapdocument")
+EditorGameView = require("src.engine.editor.panels.gameview")
+EditorMapView = require("src.engine.editor.panels.mapview")
+EditorMapBrowser = require("src.engine.editor.panels.mapbrowser")
+EditorModeTransition = require("src.engine.editor.editormodetransition")
+EditorMenuBar = require("src.engine.editor.ui.menubar")
+EditorCursor = require("src.engine.editor.editorcursor")
+EditorMessageBar = require("src.engine.editor.ui.messagebar")
 
 Layout = require("src.engine.ui.layout")
 HorizontalLayout = require("src.engine.ui.layouts.horizontal")
