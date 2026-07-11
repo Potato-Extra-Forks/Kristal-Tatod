@@ -330,7 +330,7 @@ function Editor:setupPanels(session)
             on_visibility_changed = function(_, visible)
                 self:setStandaloneGamePreviewEnabled(visible)
             end
-        }), "right")
+        }), "center")
     EditorPlugins:createPanels(self)
     self.dockspace.sizes.left = 260
     self.dockspace.minimum_center_width = SCREEN_WIDTH
