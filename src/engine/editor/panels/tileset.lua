@@ -107,7 +107,6 @@ function EditorTilesetPanel:addItem()
         self.editor:markHistoryChanged()
         self.editor:commitHistoryTransaction()
         self:refreshList(item)
-        self.editor:warnTilesetVisualOnly()
         return true
     end
     self.editor:cancelHistoryTransaction()
@@ -141,7 +140,7 @@ function EditorTilesetPanel:getItemTarget(item)
     return { title = title, fields = fields, property_set = set, properties = item.properties,
         history_owner = self.document,
         property_types = item.__editor_property_types,
-        on_changed = function() self.editor:warnTilesetVisualOnly() self:refreshList(item) end }
+        on_changed = function() self:refreshList(item) end }
 end
 
 function EditorTilesetPanel:selectItem(item)
@@ -156,7 +155,6 @@ function EditorTilesetPanel:removeItem(item)
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
     self:refreshList()
-    self.editor:warnTilesetVisualOnly()
     return true
 end
 
@@ -172,7 +170,6 @@ function EditorTilesetPanel:reorderItem(item, target)
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
     self:refreshList(value)
-    self.editor:warnTilesetVisualOnly()
 end
 
 function EditorTilesetPanel:openItemContext(item, list, x, y)

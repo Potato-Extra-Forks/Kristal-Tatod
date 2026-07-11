@@ -15,7 +15,6 @@ function EditorTilesetBrowser:init(editor)
         on_activate = function(item) if item then editor:showTilesetEditor(item.data) end end,
         on_rename = function(item, _, name)
             item.data.data.name = name
-            editor:warnTilesetVisualOnly()
         end,
         on_context_menu = function(item, list, x, y) self:openContextMenu(item, list, x, y) end,
         on_drag_start = function(item)
@@ -54,7 +53,6 @@ function EditorTilesetBrowser:createTileset()
     self:refresh(id)
     self.editor:setActiveTileset(document)
     self.editor:showTilesetEditor(document)
-    self.editor:warnTilesetVisualOnly()
 end
 
 function EditorTilesetBrowser:openContextMenu(item, list, x, y)

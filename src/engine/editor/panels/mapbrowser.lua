@@ -95,18 +95,12 @@ function EditorMapBrowser:selectNode(node)
         fields = fields,
         properties = data and data.properties or node.editor_properties,
         property_types = data and data.__editor_property_types or node.editor_property_types,
-        property_set = property_set,
-        on_changed = function()
-            self.editor:addWarning("Map and folder property changes are visual-only until file editing is implemented",
-                nil, "map_tree")
-        end
+        property_set = property_set
     }, self)
 end
 
 function EditorMapBrowser:renamedNode(node)
     self:selectNode(node)
-    self.editor:addWarning("Map and folder changes are visual-only until file editing is implemented",
-        nil, "map_tree")
 end
 
 function EditorMapBrowser:updateDockPreview(node, tree, x, y)
@@ -204,8 +198,6 @@ end
 function EditorMapBrowser:activateNode(node)
     if not node or node.type ~= "map" then return false end
     if node.registry_id then return self.editor:openMap(node.registry_id) end
-    self.editor:addWarning("New map '" .. node.name .. "' is visual-only until map creation is implemented",
-        nil, "map_tree")
     return true
 end
 

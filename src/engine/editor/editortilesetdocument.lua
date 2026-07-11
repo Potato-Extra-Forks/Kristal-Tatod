@@ -191,8 +191,7 @@ function EditorTilesetDocument:getPropertiesTarget()
                 set = function(value) data.tilerendersize = value return true end },
             { label = "Fill Mode", get = function() return data.fillmode or "stretch" end,
                 set = function(value) data.fillmode = value return true end }
-        },
-        on_changed = function() self.editor:warnTilesetVisualOnly() end
+        }
     }
 end
 
@@ -222,8 +221,7 @@ function EditorTilesetDocument:getTilePropertiesTarget(tile)
             { label = "Image", readonly = self.data.image ~= nil,
                 get = function() return source.image or (self.data.image and "Tileset image" or "") end,
                 set = function(value) if self.data.image ~= nil then return false end source.image = value return true end }
-        },
-        on_changed = function() self.editor:warnTilesetVisualOnly() end
+        }
     }
 end
 

@@ -481,11 +481,6 @@ function Editor:showTilesetEditor(document)
     return true
 end
 
-function Editor:warnTilesetVisualOnly()
-    self:addWarning("Tileset changes are visual-only until the editor tileset format and save pass are implemented",
-        nil, "tileset_editing")
-end
-
 function Editor:setShapeMode(mode)
     local modes = { point = true, line = true, rectangle = true, ellipse = true, polygon = true }
     if not modes[mode] then return false end

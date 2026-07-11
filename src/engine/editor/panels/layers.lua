@@ -70,13 +70,6 @@ function EditorLayersPanel:setDocument(document)
     self:refreshList()
 end
 
-function EditorLayersPanel:warnVisualOnly()
-    if self.warned_visual_only then return end
-    self.warned_visual_only = true
-    self.editor:addWarning("Layer changes are visual-only until the editor map format is implemented",
-        nil, "layer_editing")
-end
-
 function EditorLayersPanel:getNewLayerItems()
     local items = {}
     for _, layer_type in ipairs(Registry.getLayerTypes()) do
@@ -205,14 +198,12 @@ function EditorLayersPanel:toggleLayerVisibility(layer)
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
     self:refreshList(self.selected_layer and self.selected_layer._editor_uid)
-    self:warnVisualOnly()
     return true
 end
 
 function EditorLayersPanel:changed(refresh_list)
     if not self.document or not self.selected_layer then return end
     self.document:invalidatePreview()
-    self:warnVisualOnly()
     if refresh_list then self:refreshList(self.selected_layer._editor_uid) end
 end
 
@@ -266,7 +257,6 @@ function EditorLayersPanel:createLayer(type_id)
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
     self:refreshList(layer._editor_uid)
-    self:warnVisualOnly()
     return true
 end
 
@@ -284,7 +274,6 @@ function EditorLayersPanel:deleteLayer()
     self.selected_layer = nil
     local next_layer = #layers > 0 and layers[MathUtils.clamp(index, 1, #layers)] or nil
     self:refreshList(next_layer and next_layer._editor_uid)
-    self:warnVisualOnly()
     return true
 end
 
@@ -296,7 +285,6 @@ function EditorLayersPanel:finishLayerDrag(item, list, y)
         self.editor:markHistoryChanged()
         self.editor:commitHistoryTransaction()
         self:refreshList(item.id)
-        self:warnVisualOnly()
     else
         self.editor:cancelHistoryTransaction()
     end
