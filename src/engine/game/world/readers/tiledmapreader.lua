@@ -215,7 +215,7 @@ function operations.loadLayer(self, layer, depth)
 end
 
 function operations.loadTiles(self, layer, depth)
-    local tilelayer = TileLayer(self, layer)
+    local tilelayer = self:createTileLayer(layer)
     tilelayer:setPosition(layer.offsetx or 0, layer.offsety or 0)
     tilelayer.layer = depth
     self.world:addChild(tilelayer)
@@ -223,6 +223,21 @@ function operations.loadTiles(self, layer, depth)
     if StringUtils.startsWith(layer.name:lower(), "battleborder") then
         table.insert(self.battle_borders, tilelayer)
     end
+end
+
+function operations.createTileLayer(self, data)
+    assert(data.encoding == "lua", "Tile layer format \"" .. tostring(data.encoding)
+        .. "\" is not supported. Please set the format to CSV in the map properties.")
+    return TileLayer(self, data)
+end
+
+function operations.decodeTileData(self, tile)
+    return TiledUtils.parseTileGid(tile)
+end
+
+function operations.encodeTileData(self, tileset, tile_id)
+    local _, first_id = self:getTileset(tileset)
+    return first_id + tile_id
 end
 
 function operations.loadImage(self, layer, depth)

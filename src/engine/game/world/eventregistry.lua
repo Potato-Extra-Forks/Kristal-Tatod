@@ -6,17 +6,20 @@ local EventRegistry = Class()
 
 function EventRegistry:init()
     self.events = {}
+    self.editor_sources = {}
 end
 
 --- Register a new event with the given ID.
 ---@param id string                    The ID of the event.
 ---@param constructor fun(data):Event  A constructor function that takes event data and returns an event instance.
-function EventRegistry:register(id, constructor)
+---@param editor_source? Event        The event class whose editor metadata represents this constructor.
+function EventRegistry:register(id, constructor, editor_source)
     if self.events[id] then
         Kristal.Console:warn("Replacing already-registered event '" .. id .. "'...")
     end
 
     self.events[id] = constructor
+    self.editor_sources[id] = editor_source
 end
 
 --- Check if an event with the given ID is registered.
@@ -29,6 +32,10 @@ end
 ---@param id string   The ID of the event.
 function EventRegistry:get(id)
     return self.events[id]
+end
+
+function EventRegistry:getEditorSource(id)
+    return self.editor_sources[id]
 end
 
 --- Create a new event instance of the given ID, using the provided data.

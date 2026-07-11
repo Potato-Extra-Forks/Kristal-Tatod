@@ -25,6 +25,8 @@
 ---@overload fun(...) : Interactable
 local Interactable, super = Class(Event)
 
+Interactable.editor_sprite = "editor/interactable"
+
 ---@param x number?
 ---@param y number?
 ---@param shape EventShape?

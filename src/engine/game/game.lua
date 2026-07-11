@@ -137,8 +137,9 @@ end
 --- Register a new event class with the given ID.
 ---@param id string                    The ID of the event.
 ---@param constructor fun(data):Event  A constructor function that takes event data and returns an event instance.
-function Game:registerEvent(id, constructor)
-    self.event_registry:register(id, constructor)
+---@param editor_source? Event        The event class used for default editor preview metadata.
+function Game:registerEvent(id, constructor, editor_source)
+    self.event_registry:register(id, constructor, editor_source)
 end
 
 --- Responsible for registering all built-in events.
@@ -172,9 +173,9 @@ function Game:registerBuiltInEvents()
     end
 
     registry:register("savepoint", function(data) return Savepoint(data.center_x, data.center_y, data.properties) end)
-    registry:register("interactable", function(data) return Interactable(data.x, data.y, getShapeData(data), data.properties) end)
+    registry:register("interactable", function(data) return Interactable(data.x, data.y, getShapeData(data), data.properties) end, Interactable)
     registry:register("script", function(data) return Script(data.x, data.y, getShapeData(data), data.properties) end)
-    registry:register("transition", function(data) return Transition(data.x, data.y, getShapeData(data), data.properties) end)
+    registry:register("transition", function(data) return Transition(data.x, data.y, getShapeData(data), data.properties) end, Transition)
     registry:register("npc", function(data) return NPC(data.properties["actor"], getCharaX(data), getCharaY(data), data.properties) end)
     registry:register("enemy", function(data) return ChaserEnemy(data.properties["actor"], getCharaX(data), getCharaY(data), data.properties) end)
     registry:register("outline", function(data) return Outline(data.x, data.y, getRectData(data)) end)

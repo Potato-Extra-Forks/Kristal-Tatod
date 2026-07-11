@@ -15,6 +15,9 @@ function EditorItemList:init(options)
     self.on_drag_start = options.on_drag_start
     self.on_drag_move = options.on_drag_move
     self.on_drag_end = options.on_drag_end
+    self.on_rename = options.on_rename
+    self.on_context_menu = options.on_context_menu
+    self.on_request_focus = options.on_request_focus
     self.pending_drag = nil
     self.dragging_item = nil
     self.focusable = true
@@ -25,6 +28,16 @@ function EditorItemList:init(options)
         width = options.scrollbar_width or 12,
         on_changed = function(value) self:setScrollValue(value) end
     }))
+    self.rename_input = self:addChild(EditorTextInput({
+        on_submit = function() self:finishRename(true) end,
+        on_cancel = function() self:finishRename(false) end
+    }))
+    self.rename_input.visible = false
+    self.rename_input.onBlur = function(input)
+        input.focused = false
+        love.keyboard.setTextInput(false)
+        if self.rename_item then self:finishRename(true, true) end
+    end
 end
 
 function EditorItemList:getItemIndexAt(y)
@@ -45,18 +58,77 @@ local function normalizeItem(item, index)
         return {
             id = item.id or item.value or index,
             label = tostring(item.label or item.name or item.id or item.value or index),
-            data = item.data ~= nil and item.data or item
+            data = item.data ~= nil and item.data or item,
+            icon = item.icon,
+            color = item.color,
+            right_icon = item.right_icon,
+            right_color = item.right_color,
+            right_action = item.right_action
         }
     end
     return { id = item, label = tostring(item), data = item }
 end
 
 function EditorItemList:setItems(items)
+    if self.rename_item then self:finishRename(true) end
     self.items = {}
     for index, item in ipairs(items or {}) do
         table.insert(self.items, normalizeItem(item, index))
     end
     self:applyFilter()
+end
+
+function EditorItemList:requestFocus(control)
+    if self.on_request_focus then self.on_request_focus(control, self) end
+end
+
+function EditorItemList:beginRename(item)
+    item = item or self:getSelectedItem()
+    if not item or not self.on_rename then return false end
+    local index
+    for candidate_index, candidate in ipairs(self.filtered_items) do
+        if candidate == item then index = candidate_index break end
+    end
+    if not index then return false end
+    self.rename_item = item
+    self.rename_input:setValue(item.label, true)
+    self.rename_input.cursor = #self.rename_input.value + 1
+    self.rename_input.visible = true
+    self:updateRenameBounds()
+    self:requestFocus(self.rename_input)
+    return true
+end
+
+function EditorItemList:finishRename(commit, from_blur)
+    local item = self.rename_item
+    if not item then return false end
+    local old_label = item.label
+    local new_label = tostring(self.rename_input.value or ""):match("^%s*(.-)%s*$")
+    if commit and new_label ~= "" then item.label = new_label end
+    self.rename_item = nil
+    self.rename_input.visible = false
+    if commit and item.label ~= old_label then self.on_rename(item, old_label, item.label, self) end
+    if not from_blur then self:requestFocus(self) end
+    return true
+end
+
+function EditorItemList:updateRenameBounds()
+    if not self.rename_item then return end
+    local index
+    for candidate_index, candidate in ipairs(self.filtered_items) do
+        if candidate == self.rename_item then index = candidate_index break end
+    end
+    if not index then return self:finishRename(true) end
+    local y = -(self.scroll_row - math.floor(self.scroll_row)) * self.row_height
+        + (index - math.floor(self.scroll_row) - 1) * self.row_height
+    local label_x = 6
+    if self.rename_item.icon then
+        local texture = Assets.getTexture(self.rename_item.icon)
+        if texture then label_x = 6 + texture:getWidth() + 8 end
+    end
+    local right_space = self.rename_item.right_icon and self.row_height or 0
+    self.rename_input:setBounds(label_x - 3, y + 1,
+        math.max(20, self.width - self.scrollbar.width - label_x - right_space), self.row_height - 2)
 end
 
 function EditorItemList:setFilter(filter)
@@ -127,10 +199,36 @@ function EditorItemList:onFocus() self.focused = true end
 function EditorItemList:onBlur() self.focused = false end
 
 function EditorItemList:onMousePressed(x, y, button, presses)
-    if button ~= 1 or x >= self.width - self.scrollbar.width then return false end
+    if x >= self.width - self.scrollbar.width then return false end
     local index = self:getItemIndexAt(y)
+    local item = self.filtered_items[index]
+    if button == 1 and item and item.right_icon and item.right_action then
+        local texture = Assets.getTexture(item.right_icon)
+        local icon_width = texture and texture:getWidth() or self.row_height
+        local icon_right = self.width - self.scrollbar.width - 6
+        if x >= icon_right - icon_width and x <= icon_right then
+            item.right_action(item, self)
+            return true
+        end
+    end
+    if button == 2 then
+        if self.filtered_items[index] then
+            self:select(index)
+            if self.on_context_menu then self.on_context_menu(self.filtered_items[index], self, x, y) end
+        elseif self.on_context_menu then
+            self.on_context_menu(nil, self, x, y)
+        end
+        return self.on_context_menu ~= nil
+    end
+    if button ~= 1 then return false end
     if self.filtered_items[index] then
+        local already_selected = self.selected_index == index
         self:select(index, presses and presses >= 2)
+        if already_selected and self.on_select then self.on_select(self.filtered_items[index], self) end
+        if presses and presses >= 2 and self.on_rename then
+            self:beginRename(self.filtered_items[index])
+            return true
+        end
         if self.on_drag_end then
             self.pending_drag = { item = self.filtered_items[index], x = x, y = y }
         end
@@ -199,6 +297,7 @@ end
 function EditorItemList:update(dt)
     self.scrollbar:setBounds(self.width - self.scrollbar.width, 0, self.scrollbar.width, self.height)
     self:clampScroll()
+    self:updateRenameBounds()
     super.update(self, dt)
 end
 
@@ -216,8 +315,31 @@ function EditorItemList:drawSelf()
             love.graphics.setColor(self.focused and 0.22 or 0.17, self.focused and 0.34 or 0.22, self.focused and 0.52 or 0.30, 1)
             love.graphics.rectangle("fill", 0, y, self.width - self.scrollbar.width, self.row_height)
         end
-        love.graphics.setColor(0.88, 0.88, 0.90, 1)
-        love.graphics.print(self.filtered_items[index].label, 6, math.floor(y + (self.row_height - font:getHeight()) / 2))
+        local item = self.filtered_items[index]
+        local label_x = 6
+        if item.icon then
+            local texture = Assets.getTexture(item.icon)
+            if texture then
+                local icon_x = 6
+                local icon_y = math.floor(y + (self.row_height - texture:getHeight()) / 2)
+                Draw.setColor(item.color or { 1, 1, 1, 1 })
+                Draw.draw(texture, icon_x, icon_y)
+                label_x = icon_x + texture:getWidth() + 8
+            end
+        end
+        if item ~= self.rename_item then
+            love.graphics.setColor(0.88, 0.88, 0.90, 1)
+            love.graphics.print(item.label, label_x, math.floor(y + (self.row_height - font:getHeight()) / 2))
+        end
+        if item.right_icon then
+            local texture = Assets.getTexture(item.right_icon)
+            if texture then
+                local icon_x = self.width - self.scrollbar.width - texture:getWidth() - 6
+                local icon_y = math.floor(y + (self.row_height - texture:getHeight()) / 2)
+                Draw.setColor(item.right_color or { 0.82, 0.82, 0.85, 1 })
+                Draw.draw(texture, icon_x, icon_y)
+            end
+        end
     end
 end
 

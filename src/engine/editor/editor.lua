@@ -215,13 +215,13 @@ function Editor:setupWindow(session)
     local saved_height = session and type(session.window) == "table" and session.window.height
     local requested_width = type(saved_width) == "number" and saved_width or math.max(current_width, EDITOR_DEFAULT_WIDTH)
     local requested_height = type(saved_height) == "number" and saved_height or math.max(current_height, EDITOR_DEFAULT_HEIGHT)
-    local editor_width = math.min(desktop_width, math.max(SCREEN_WIDTH + 265, requested_width))
+    local editor_width = math.min(desktop_width, math.max(SCREEN_WIDTH + 570, requested_width))
     local editor_height = math.min(desktop_height,
         math.max(SCREEN_HEIGHT + EditorMenuBar.HEIGHT + EditorMessageBar.HEIGHT + 28, requested_height))
     local editor_flags = TableUtils.copy(flags, true)
     editor_flags.fullscreen = false
     editor_flags.resizable = true
-    editor_flags.minwidth = math.min(editor_width, SCREEN_WIDTH + 265)
+    editor_flags.minwidth = math.min(editor_width, SCREEN_WIDTH + 570)
     editor_flags.minheight = math.min(editor_height,
         SCREEN_HEIGHT + EditorMenuBar.HEIGHT + EditorMessageBar.HEIGHT + 28)
     love.window.updateMode(fromPixels(editor_width), fromPixels(editor_height), editor_flags)
@@ -316,6 +316,21 @@ function Editor:setupPanels(session)
         preferred_width = 260,
         recoverable = true
     }), "left")
+    self.layers_panel = self.dockspace:registerPanel(EditorPanel("layers", "Layers", self.layers_browser, {
+        minimum_width = 220,
+        minimum_height = 360,
+        preferred_width = 300,
+        recoverable = true
+    }), "right")
+    self.properties_panel = self.dockspace:registerPanel(EditorPanel(
+        "properties", "Properties", self.properties_browser, {
+            minimum_width = 220,
+            minimum_height = 180,
+            preferred_width = 300,
+            preferred_height = 300,
+            recoverable = true
+        }), "right")
+    self.dockspace:dockPanelSplit(self.properties_panel, self.layers_panel.stack, "bottom")
     self.game_preview_panel = self.dockspace:registerPanel(EditorPanel(
         "game_preview", "Game Preview", self.game_preview, {
             visible = true,
@@ -333,6 +348,7 @@ function Editor:setupPanels(session)
         }), "center")
     EditorPlugins:createPanels(self)
     self.dockspace.sizes.left = 260
+    self.dockspace.sizes.right = 300
     self.dockspace.minimum_center_width = SCREEN_WIDTH
     self.dockspace.minimum_center_height = SCREEN_HEIGHT + 28
     self.menu_bar:setBounds(0, 0, love.graphics.getWidth())
@@ -342,6 +358,7 @@ function Editor:setupPanels(session)
 
     self.default_layout = self:captureLayout()
     if session and type(session.layout) == "table" then
+        local had_properties_panel = session.layout.panels and session.layout.panels.properties
         local saved_layout = TableUtils.copy(session.layout, true)
         if saved_layout.panels and saved_layout.panels.game_preview then
             saved_layout.panels.game_preview.visible = session.standalone_preview_enabled ~= false
@@ -351,6 +368,8 @@ function Editor:setupPanels(session)
             self:restoreLayout(self.default_layout)
             self:addWarning("Could not restore the editor panel layout: " .. tostring(message),
                 nil, "editor_session")
+        elseif not had_properties_panel then
+            self.dockspace:dockPanelSplit(self.properties_panel, self.layers_panel.stack, "bottom")
         end
     end
 end
@@ -416,6 +435,8 @@ function Editor:enter(previous, options)
     self.active_document = nil
     self.game_view = nil
     self.map_browser = EditorMapBrowser(self)
+    self.layers_browser = EditorLayersPanel(self)
+    self.properties_browser = EditorPropertiesPanel(self)
     self.menu_bar = EditorMenuBar(self)
     self.editor_cursor = EditorCursor()
     self.editor_cursor:setCustomEnabled(self.use_custom_cursors)
@@ -466,6 +487,11 @@ function Editor:leave()
     self.game_view = nil
     self.game_panel = nil
     self.game_preview_panel = nil
+    self.layers_browser = nil
+    self.layers_panel = nil
+    self.properties_browser = nil
+    self.properties_panel = nil
+    self.properties_target_owner = nil
     self.standalone_preview_document = nil
     self.standalone_preview_map_id = nil
     self.game_preview_paused = nil
@@ -486,6 +512,18 @@ function Editor:leave()
     self.game_music_suspended_by_editor = nil
     self.game_preview_movement_lock = nil
     self.game_preview_lock_before_pause = nil
+end
+
+function Editor:setPropertiesTarget(target, owner)
+    self.properties_target_owner = owner
+    if self.properties_browser then self.properties_browser:setTarget(target) end
+end
+
+function Editor:clearPropertiesTarget(owner)
+    if owner and self.properties_target_owner ~= owner then return false end
+    self.properties_target_owner = nil
+    if self.properties_browser then self.properties_browser:setTarget(nil) end
+    return true
 end
 
 function Editor:setCustomCursorsEnabled(enabled)
@@ -919,6 +957,7 @@ function Editor:activateMapDocument(document, options)
         self.dockspace:setPanelVisible(document.panel, true, document.panel.last_region or "center")
     end
     self.active_document = document
+    if self.layers_browser then self.layers_browser:setDocument(document) end
     if options.select_panel ~= false and document.panel and document.panel.stack then
         document.panel.stack:setActivePanel(document.panel)
     end
@@ -1028,6 +1067,7 @@ function Editor:removeMapDocument(document)
             self:activateMapDocument(replacement)
         else
             self.game_panel = nil
+            if self.layers_browser then self.layers_browser:setDocument(nil) end
             self.dockspace:setFocus(nil)
         end
     end
@@ -1092,11 +1132,53 @@ function Editor:clearGameObjectSelection()
     if not debug_system or debug_system.selection_environment_owner ~= self then return false end
     if debug_system.context then debug_system.context:close() end
     debug_system:unselectObject()
+    self:clearPropertiesTarget(self)
     debug_system:clearSelectionEnvironment(self)
     self.object_selection_cursor_x = nil
     self.object_selection_cursor_y = nil
     self.object_selection_mouse_buttons = {}
     return true
+end
+
+function Editor:getGameObjectPropertiesTarget(object)
+    local function numberField(label, key)
+        return {
+            label = label,
+            get = function() return object[key] or 0 end,
+            set = function(value)
+                local number = tonumber(value)
+                if not number then
+                    self:addWarning(label .. " must be a number", nil, "object_property")
+                    return false
+                end
+                object[key] = number
+                if object.data then object.data[key] = number end
+                self:clearDiagnostics("object_property")
+                return true
+            end
+        }
+    end
+    local data = object.data
+    if data then
+        data.properties = data.properties or {}
+    else
+        object.editor_properties = object.editor_properties or {}
+    end
+    return {
+        title = ClassUtils.getClassName(object) or "Game Object",
+        fields = {
+            numberField("X", "x"),
+            numberField("Y", "y"),
+            numberField("Width", "width"),
+            numberField("Height", "height"),
+            numberField("Layer", "layer")
+        },
+        properties = data and data.properties or object.editor_properties,
+        on_changed = function()
+            self:addWarning("Game object property changes affect only the current preview",
+                nil, "object_property_preview")
+        end
+    }
 end
 
 function Editor:isGameObjectSelectionActive()
@@ -1137,6 +1219,7 @@ function Editor:handleGameObjectSelectionMousePressed(x, y, button, istouch, pre
     local object = debug_system:detectObject(game_x, game_y)
     if object then
         debug_system:selectObject(object)
+        self:setPropertiesTarget(self:getGameObjectPropertiesTarget(object), self)
         if button == 1 then
             debug_system.grabbing = true
             local screen_x, screen_y = object:getScreenPos()
@@ -1147,6 +1230,7 @@ function Editor:handleGameObjectSelectionMousePressed(x, y, button, istouch, pre
         end
     else
         debug_system:unselectObject()
+        self:clearPropertiesTarget(self)
     end
     self.object_selection_mouse_buttons[button] = true
     return true

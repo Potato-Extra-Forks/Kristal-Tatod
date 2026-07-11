@@ -11,6 +11,7 @@
 ---@field object_id         integer
 ---@field solid             boolean
 ---@field sprite            Sprite?
+---@field editor_sprite     string?      A class-level texture id used by stage-independent editor previews
 ---@field unique_id         string
 ---@field world             World       The world that this event is contained in
 ---@field data              table

@@ -531,7 +531,6 @@ function EditorDockSpace:undockPanel(panel, source_rect)
 end
 
 function EditorDockSpace:openPanelContextMenu(panel, x, y)
-    local font = EditorFont.get(16)
     local source_rect = self:getPanelRect(panel)
     local items = {}
     if panel.stack then
@@ -555,6 +554,13 @@ function EditorDockSpace:openPanelContextMenu(panel, x, y)
         action = function() self:closePanelFromContext(panel) end
     })
 
+    self:openContextMenu(items, x, y, panel)
+    self.context_menu.panel = panel
+end
+
+function EditorDockSpace:openContextMenu(items, x, y, owner)
+    if not items or #items == 0 then return false end
+    local font = EditorFont.get(16)
     local width = 140
     for _, item in ipairs(items) do width = math.max(width, font:getWidth(item.label) + 24) end
     local height = #items * 28
@@ -564,12 +570,13 @@ function EditorDockSpace:openPanelContextMenu(panel, x, y)
         item.rect = { x = menu_x, y = menu_y + (index - 1) * 28, width = width, height = 28 }
     end
     self.context_menu = {
-        panel = panel,
+        owner = owner,
         items = items,
         rect = { x = menu_x, y = menu_y, width = width, height = height },
         submenu = nil,
         submenu_rect = nil
     }
+    return true
 end
 
 function EditorDockSpace:openContextSubmenu(menu, item)
@@ -703,7 +710,7 @@ function EditorDockSpace:onMousePressed(x, y, button, presses)
             end
         end
         self.context_menu = nil
-        if button == 1 or button == 2 then return true end
+        if button == 1 then return true end
     end
     if button == 2 then
         local panel = self:getTabAt(x, y)

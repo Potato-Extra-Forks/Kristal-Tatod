@@ -321,6 +321,18 @@ function Map:loadTiles(layer, depth)
     return self.reader:call("loadTiles", layer, depth)
 end
 
+function Map:createTileLayer(data)
+    return self.reader:call("createTileLayer", data)
+end
+
+function Map:decodeTileData(tile)
+    return self.reader:call("decodeTileData", tile)
+end
+
+function Map:encodeTileData(tileset, tile_id, ...)
+    return self.reader:call("encodeTileData", tileset, tile_id, ...)
+end
+
 function Map:loadImage(layer, depth)
     return self.reader:call("loadImage", layer, depth)
 end

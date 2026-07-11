@@ -21,14 +21,64 @@ function EditorMapBrowser:init(editor)
     self.new_map_button = self:addChild(EditorButton("New Map", function() self:createMap() end))
     self.new_folder_button = self:addChild(EditorButton("New Folder", function() self:createFolder() end))
     self.tree = self:addChild(EditorTreeList({
+        on_select = function(node) self:selectNode(node) end,
         on_activate = function(node) self:activateNode(node) end,
+        on_rename = function(node) self:renamedNode(node) end,
         on_drag_outside = function(node, tree, x, y) self:dropOutside(node, tree, x, y) end,
         on_drag_move = function(node, tree, x, y) self:updateDockPreview(node, tree, x, y) end,
         on_drag_end = function() self.editor.dockspace.dock_preview = nil end,
+        on_context_menu = function(node, tree, x, y) self:openNodeContextMenu(node, tree, x, y) end,
         on_request_focus = function(control) self.editor.dockspace:setFocus(control) end
     }))
     self.list = self.tree
     self:refresh()
+end
+
+function EditorMapBrowser:selectNode(node)
+    if not node then
+        self.editor:clearPropertiesTarget(self)
+        return
+    end
+    node.editor_properties = node.editor_properties or {}
+    local data = node.registry_id and Registry.getMapData(node.registry_id)
+    local reader_class = node.registry_id and Registry.getMapReader(node.registry_id)
+    local fields = {
+        {
+            label = "Name",
+            get = function() return node.name end,
+            set = function() return false end,
+            readonly = true
+        }
+    }
+    if node.registry_id then
+        table.insert(fields, {
+            label = "Path",
+            get = function() return node.registry_id end,
+            set = function() return false end,
+            readonly = true
+        })
+        table.insert(fields, {
+            label = "Format",
+            get = function() return reader_class and reader_class.LEGACY_FORMAT and "Legacy Tiled" or "Editor" end,
+            set = function() return false end,
+            readonly = true
+        })
+    end
+    self.editor:setPropertiesTarget({
+        title = node.type == "folder" and "Folder" or "Map",
+        fields = fields,
+        properties = data and data.properties or node.editor_properties,
+        on_changed = function()
+            self.editor:addWarning("Map and folder property changes are visual-only until file editing is implemented",
+                nil, "map_tree")
+        end
+    }, self)
+end
+
+function EditorMapBrowser:renamedNode(node)
+    self:selectNode(node)
+    self.editor:addWarning("Map and folder changes are visual-only until file editing is implemented",
+        nil, "map_tree")
 end
 
 function EditorMapBrowser:updateDockPreview(node, tree, x, y)
@@ -83,18 +133,44 @@ function EditorMapBrowser:refresh()
     if current_id and maps[current_id] then self.tree:selectNode(maps[current_id]) end
 end
 
-function EditorMapBrowser:createFolder()
-    local parent = self.tree:getInsertionParent()
+function EditorMapBrowser:createFolder(parent)
+    parent = parent or self.tree:getInsertionParent()
     local node = self.tree:createFolder(parent, uniqueName(parent, "New Folder"), { virtual = true })
     self.tree:beginRename(node)
     return node
 end
 
-function EditorMapBrowser:createMap()
-    local parent = self.tree:getInsertionParent()
+function EditorMapBrowser:createMap(parent)
+    parent = parent or self.tree:getInsertionParent()
     local node = self.tree:createMap(parent, uniqueName(parent, "New Map"), { virtual = true })
     self.tree:beginRename(node)
     return node
+end
+
+function EditorMapBrowser:openNodeContextMenu(node, tree, x, y)
+    local parent = node and (node.type == "folder" and node or node.parent) or tree.root
+    local items = {}
+    if node and node.type == "map" and node.registry_id then
+        table.insert(items, { label = "Open", action = function() self:activateNode(node) end })
+    end
+    if not node or node.type == "folder" then
+        table.insert(items, { label = "New Map", action = function() self:createMap(parent) end })
+        table.insert(items, { label = "New Folder", action = function() self:createFolder(parent) end })
+    end
+    if node then
+        if node.type == "folder" then
+            table.insert(items, {
+                label = node.expanded and "Collapse" or "Expand",
+                action = function() tree:toggleFolder(node) end
+            })
+        end
+        table.insert(items, { label = "Rename", action = function() tree:beginRename(node) end })
+        if node.virtual then
+            table.insert(items, { label = "Remove", action = function() tree:removeNode(node) end })
+        end
+    end
+    local global_x, global_y = tree:getGlobalPosition()
+    self.editor.dockspace:openContextMenu(items, global_x + x, global_y + y, tree)
 end
 
 function EditorMapBrowser:activateNode(node)

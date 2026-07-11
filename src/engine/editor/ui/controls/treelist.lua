@@ -39,6 +39,7 @@ function EditorTreeList:init(options)
     self.on_drag_outside = options.on_drag_outside
     self.on_drag_move = options.on_drag_move
     self.on_drag_end = options.on_drag_end
+    self.on_context_menu = options.on_context_menu
     self.on_request_focus = options.on_request_focus
     self.focusable = true
     self.focused = false
@@ -287,6 +288,16 @@ function EditorTreeList:toggleFolder(node)
     return true
 end
 
+function EditorTreeList:removeNode(node)
+    if not node or not node.parent then return false end
+    removeFromParent(node)
+    if self.selected_node == node or (node.type == "folder" and containsNode(node, self.selected_node)) then
+        self.selected_node = nil
+    end
+    self:refreshVisibleNodes()
+    return true
+end
+
 function EditorTreeList:moveNode(node, parent, after)
     if not node or not node.parent or not parent or parent.type ~= "folder" then return false end
     if node == parent or (node.type == "folder" and containsNode(node, parent)) then return false end
@@ -338,15 +349,24 @@ function EditorTreeList:onFocus() self.focused = true end
 function EditorTreeList:onBlur() self.focused = false end
 
 function EditorTreeList:onMousePressed(x, y, button, presses)
-    if button ~= 1 or x >= self.width - self.scrollbar.width then return false end
+    if x >= self.width - self.scrollbar.width then return false end
     local index = self:getNodeIndexAt(y)
+    if button == 2 then
+        local node = index and self.visible_nodes[index].node or nil
+        self:selectNode(node)
+        if self.on_context_menu then self.on_context_menu(node, self, x, y) end
+        return self.on_context_menu ~= nil
+    end
+    if button ~= 1 then return false end
     if not index then
         self:selectNode(nil)
         return true
     end
     local entry = self.visible_nodes[index]
     local node = entry.node
+    local already_selected = self.selected_node == node
     self:selectNode(node)
+    if already_selected and self.on_select then self.on_select(node, self) end
     local disclosure_x = 5 + entry.depth * INDENT_WIDTH
     if node.type == "folder" and x >= disclosure_x and x < disclosure_x + 13 then
         self:toggleFolder(node)
