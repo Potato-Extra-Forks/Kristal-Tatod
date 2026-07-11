@@ -437,6 +437,16 @@ function Registry.getMapData(id)
 end
 
 ---@param id string
+---@return MapReader?
+function Registry.getMapReader(id)
+    local map_class = self.maps[id]
+    local data = self.map_data[id]
+    return (self.map_readers and self.map_readers[id])
+        or (map_class and map_class.reader_class)
+        or (data and data.__map_reader)
+end
+
+---@param id string
 ---@return Event|Object?
 function Registry.getLegacyEvent(id)
     return self.events[id]
@@ -617,14 +627,27 @@ end
 
 ---@param id string
 ---@param data table
-function Registry.registerMapData(id, data)
+---@param reader_class? MapReader
+function Registry.registerMapData(id, data, reader_class)
+    self.map_readers = self.map_readers or {}
+    reader_class = reader_class or data.__map_reader or self.map_readers[id] or TiledMapReader
+    assert(isClass(reader_class) and reader_class:includes(MapReader),
+        "Registered map reader must be a MapReader class")
+    data.__map_reader = reader_class
     self.map_data[id] = data
+    self.map_readers[id] = reader_class
 end
 
 ---@param id string
 ---@param class Map
-function Registry.registerMap(id, class)
+---@param reader_class? MapReader
+function Registry.registerMap(id, class, reader_class)
+    self.map_readers = self.map_readers or {}
     self.maps[id] = class
+    reader_class = reader_class or class.reader_class or self.map_readers[id] or TiledMapReader
+    assert(isClass(reader_class) and reader_class:includes(MapReader),
+        "Registered map reader must be a MapReader class")
+    self.map_readers[id] = reader_class
 end
 
 ---@param id string
@@ -852,6 +875,7 @@ function Registry.initTilesets()
     for full_path, path, data in self.iterScripts(Registry.paths["tilesets"]) do
         data.full_path = full_path
         data.id = path
+        data.__tileset_reader = TiledTilesetReader
         self.registerTileset(path, Tileset(data, full_path, FileSystemUtils.getDirname(full_path)))
     end
 
@@ -861,6 +885,7 @@ end
 function Registry.initMaps()
     self.maps = {}
     self.map_data = {}
+    self.map_readers = {}
 
     for full_path, path, data in self.iterScripts(Registry.paths["maps"]) do
         local split_path = StringUtils.split(path, "/", true)

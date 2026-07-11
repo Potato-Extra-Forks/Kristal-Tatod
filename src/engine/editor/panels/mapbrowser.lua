@@ -68,9 +68,13 @@ function EditorMapBrowser:refresh()
             end
             parent = folders[path]
         end
+        local reader_class = Registry.getMapReader(id)
+        local legacy_format = reader_class and reader_class.LEGACY_FORMAT == true
         local node = self.tree:createMap(parent, parts[#parts] or id, {
             registry_id = id,
-            virtual = false
+            virtual = false,
+            badge_text = legacy_format and "*" or nil,
+            badge_color = legacy_format and { 1, 0.82, 0.16, 1 } or nil
         })
         maps[id] = node
     end

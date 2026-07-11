@@ -52,7 +52,7 @@ function EditorTreeList:init(options)
     self.dragging_node = nil
     self.drop_node = nil
     self.root = { type = "folder", name = "", children = {}, expanded = true, root = true }
-    self.folder_icon = Assets.getTexture("kristal/editor/ui/folder")
+    self.folder_icon = Assets.getTexture("editor/ui/folder")
 
     self.scrollbar = self:addChild(EditorScrollbar({
         width = options.scrollbar_width or 12,
@@ -79,6 +79,8 @@ function EditorTreeList:newNode(node_type, name, options)
         expanded = node_type == "folder" and true or nil,
         registry_id = options.registry_id,
         virtual = options.virtual == true,
+        badge_text = options.badge_text,
+        badge_color = options.badge_color,
         uid = self.next_uid
     }
     self.next_uid = self.next_uid + 1
@@ -482,6 +484,11 @@ function EditorTreeList:drawSelf()
             Draw.setColor(node.virtual and 0.62 or 0.88, node.virtual and 0.75 or 0.88,
                 node.virtual and 0.92 or 0.90, 1)
             love.graphics.print(node.name, label_x, math.floor(y + (self.row_height - font:getHeight()) / 2))
+            if node.badge_text then
+                Draw.setColor(node.badge_color or { 1, 1, 1, 1 })
+                love.graphics.print(node.badge_text, label_x + font:getWidth(node.name) + 4,
+                    math.floor(y + (self.row_height - font:getHeight()) / 2))
+            end
         end
     end
 end
