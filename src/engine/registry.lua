@@ -27,6 +27,8 @@
 ---@field layer_types LayerTypeRegistry
 ---@field editor_events table<string, EditorEvent>
 ---@field editor_properties EditorPropertyRegistry
+---@field editor_worlds table<string, EditorWorld>
+---@field editor_draw_fx table<string, table>
 ---@field tilesets table<string, Tileset>
 ---@field maps table<string, Map>
 ---@field map_data table<string, table> -- TODO: Document map data
@@ -100,6 +102,8 @@ function Registry.initialize(preload)
         Registry.initCutscenes()
         Registry.initEventScripts()
         Registry.initEditorProperties()
+        Registry.initEditorDrawFX()
+        Registry.initEditorWorlds()
         Registry.initLayerTypes()
         Registry.initTilesets()
         Registry.initMaps()
@@ -124,6 +128,8 @@ function Registry.saveData()
     end
     self.saved_data.map_readers = self.map_readers
     self.saved_data.layer_types = self.layer_types
+    self.saved_data.editor_worlds = self.editor_worlds
+    self.saved_data.editor_draw_fx = self.editor_draw_fx
 end
 
 ---@return boolean
@@ -134,6 +140,8 @@ function Registry.restoreData()
         end
         self.map_readers = self.saved_data.map_readers
         self.layer_types = self.saved_data.layer_types
+        self.editor_worlds = self.saved_data.editor_worlds or {}
+        self.editor_draw_fx = self.saved_data.editor_draw_fx or {}
         return true
     else
         return false
@@ -472,6 +480,48 @@ end
 function Registry.registerEditorPropertyType(id, definition)
     assert(self.editor_properties, "Editor property registry is not initialized")
     return self.editor_properties:registerType(id, definition)
+end
+
+function Registry.getEditorWorld(id)
+    return self.editor_worlds and self.editor_worlds[id]
+end
+
+function Registry.registerEditorWorld(id, world)
+    assert(type(id) == "string" and id ~= "", "Editor worlds require an id")
+    assert(isClass(world) and world:includes(EditorWorld), "Editor worlds must be EditorWorld instances")
+    self.editor_worlds = self.editor_worlds or {}
+    self.editor_worlds[id] = world
+    world.id = id
+    return world
+end
+
+function Registry.getEditorDrawFX(id)
+    return self.editor_draw_fx and self.editor_draw_fx[id]
+end
+
+function Registry.getEditorDrawFXAll()
+    local result = {}
+    for _, definition in pairs(self.editor_draw_fx or {}) do table.insert(result, definition) end
+    table.sort(result, function(a, b) return a.name:lower() < b.name:lower() end)
+    return result
+end
+
+function Registry.registerEditorDrawFX(id, definition)
+    assert(type(id) == "string" and id ~= "", "Editor DrawFX require an id")
+    local editor_class = definition and definition.class
+    definition = TableUtils.copy(definition or {}, true)
+    definition.class = editor_class
+    definition.id = id
+    definition.name = definition.name or StringUtils.titleCase(id:gsub("[/_]", " "))
+    self.editor_draw_fx = self.editor_draw_fx or {}
+    self.editor_draw_fx[id] = definition
+    return definition
+end
+
+function Registry.createEditorDrawFX(id, data)
+    local definition = assert(self.getEditorDrawFX(id), "Unknown editor DrawFX: " .. tostring(id))
+    local class = definition.class or EditorDrawFX
+    return class(id, definition, data)
 end
 
 function Registry.getLayerTypes()
@@ -940,6 +990,70 @@ function Registry.initEditorProperties()
     Kristal.callEvent(KRISTAL_EVENT.onRegisterEditorPropertyTypes, self.editor_properties)
 end
 
+function Registry.initEditorDrawFX()
+    self.editor_draw_fx = {}
+    local function register(id, name, initializer, priority)
+        self.registerEditorDrawFX(id, { name = name, init = initializer, priority = priority })
+    end
+    register("alpha", "Alpha", function(fx)
+        fx:registerProperty("alpha", "number", { default = 1 })
+    end, 100)
+    register("color_mask", "Color Mask", function(fx)
+        fx:registerProperty("color", "color", { default = "#FFFFFFFF" })
+        fx:registerProperty("amount", "number", { default = 1 })
+    end)
+    register("recolor", "Recolor", function(fx)
+        fx:registerProperty("color", "color", { default = "#FFFFFFFF" })
+    end, -1)
+    register("outline", "Outline", function(fx)
+        fx:registerProperty("color", "color", { default = "#FFFFFFFF" })
+        fx:registerProperty("thickness", "number", { default = 1 })
+        fx:registerProperty("amount", "number", { default = 1 })
+        fx:registerProperty("cutout", "boolean")
+    end)
+    register("battle_outline", "Battle Outline", function(fx)
+        fx:registerProperty("color", "color", { default = "#FFFFFFFF" })
+        fx:registerProperty("thickness", "number", { default = 1 })
+    end)
+    register("shadow", "Shadow", function(fx)
+        fx:registerProperty("alpha", "number", { default = 0.75 })
+        fx:registerProperty("highlight", "color", { default = "#00000000" })
+        fx:registerProperty("scale", "number", { default = 1 })
+    end)
+    register("fountain_shadow", "Fountain Shadow", function(fx)
+        fx:registerProperty("alpha", "number", { default = 0.75 })
+        fx:registerProperty("scale", "number", { default = 1 })
+    end)
+    register("gradient", "Gradient", function(fx)
+        fx:registerProperty("from", "color", { default = "#FFFFFFFF" })
+        fx:registerProperty("to", "color", { default = "#000000FF" })
+        fx:registerProperty("alpha", "number", { default = 1 })
+        fx:registerProperty("direction", "number")
+    end, 200)
+    register("scissor", "Scissor", function(fx)
+        fx:registerProperty("x", "number")
+        fx:registerProperty("y", "number")
+        fx:registerProperty("width", "number")
+        fx:registerProperty("height", "number")
+    end)
+    register("mask", "Mask", function(fx)
+        fx:registerProperty("mask", "object_reference")
+        fx:registerProperty("draw_children", "boolean", { name = "Draw Children", default = true })
+        fx:registerProperty("inverted", "boolean")
+    end, 1000)
+    register("shader", "Shader", function(fx)
+        fx:registerProperty("shader", "string")
+    end)
+    for id in pairs(self.draw_fx or {}) do
+        if not self.editor_draw_fx[id] then self.registerEditorDrawFX(id, {}) end
+    end
+    Kristal.callEvent(KRISTAL_EVENT.onRegisterEditorDrawFX, self.editor_draw_fx)
+end
+
+function Registry.initEditorWorlds()
+    self.editor_worlds = {}
+end
+
 function Registry.initTilesets()
     self.tilesets = {}
 
@@ -1007,7 +1121,8 @@ function Registry.initEditorEvents()
         fountainfloor = EditorFountainFloor, quicksave = EditorQuicksave, sprite = EditorSpriteEvent,
         climbentry = EditorClimbEntry, climbexit = EditorClimbExit, climblanding = EditorClimbLanding,
         climbarea = EditorClimbArea, fallingclimbarea = EditorFallingClimbArea,
-        climbunsafe = EditorClimbUnsafe, climbmover = EditorClimbMover
+        climbunsafe = EditorClimbUnsafe, climbmover = EditorClimbMover,
+        toggle = EditorToggleController, fountainshadow = EditorFountainShadowController
     }
     for id, event in pairs(builtins) do self.registerEditorEvent(id, event) end
 

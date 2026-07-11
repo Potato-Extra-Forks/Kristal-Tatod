@@ -24,9 +24,20 @@ function EditorMapBrowser:init(editor)
         on_select = function(node) self:selectNode(node) end,
         on_activate = function(node) self:activateNode(node) end,
         on_rename = function(node) self:renamedNode(node) end,
+        on_drag_start = function(node)
+            self.editor:beginDragPreview(node.type, node.name,
+                node.type == "folder" and "editor/ui/folder" or "editor/ui/layer/default", node.registry_id)
+        end,
         on_drag_outside = function(node, tree, x, y) self:dropOutside(node, tree, x, y) end,
-        on_drag_move = function(node, tree, x, y) self:updateDockPreview(node, tree, x, y) end,
-        on_drag_end = function() self.editor.dockspace.dock_preview = nil end,
+        on_drag_move = function(node, tree, x, y)
+            local gx, gy = tree:getGlobalPosition()
+            self.editor:updateDragPreview(gx + x, gy + y)
+            self:updateDockPreview(node, tree, x, y)
+        end,
+        on_drag_end = function()
+            self.editor.dockspace.dock_preview = nil
+            self.editor:finishDragPreview()
+        end,
         on_context_menu = function(node, tree, x, y) self:openNodeContextMenu(node, tree, x, y) end,
         on_request_focus = function(control) self.editor.dockspace:setFocus(control) end
     }))
@@ -201,6 +212,7 @@ end
 function EditorMapBrowser:dropOutside(node, tree, x, y)
     if node.type ~= "map" or not node.registry_id then return false end
     local tree_x, tree_y = tree:getGlobalPosition()
+    if self.editor:addMapToWorldAtScreen(node.registry_id, tree_x + x, tree_y + y) then return true end
     local target = self.editor:getMapPanelDropTarget(tree_x + x, tree_y + y)
     if target then return self.editor:openMapTab(node.registry_id, target) end
     return false

@@ -1,4 +1,5 @@
 local EditorSavepoint, super = Class(EditorEvent)
+EditorSavepoint.editor_sprite = "world/events/savepoint"
 
 function EditorSavepoint:init(data, options)
     super.init(self, data, options)

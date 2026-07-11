@@ -12,6 +12,8 @@ local CURSORS = {
     resize_diag_l = { path = "kristal/mouse/resize_diag_l", hotspot_x = 7, hotspot_y = 7, system = "sizenwse" },
     resize_all = { path = "kristal/mouse/resize_all", hotspot_x = 7, hotspot_y = 8, system = "sizeall" },
     grab = { path = "kristal/mouse/grab", hotspot_x = 6, hotspot_y = 7, system = "hand" },
+    crosshair = { path = "kristal/mouse/select", hotspot_x = 0, hotspot_y = 0, system = "crosshair" },
+    link = { path = "kristal/mouse/select", hotspot_x = 0, hotspot_y = 0, system = "crosshair" },
     cannot = { path = "kristal/mouse/cannot", hotspot_x = 7, hotspot_y = 7, system = "no" }
 }
 

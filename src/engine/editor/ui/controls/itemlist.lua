@@ -60,6 +60,7 @@ local function normalizeItem(item, index)
             label = tostring(item.label or item.name or item.id or item.value or index),
             data = item.data ~= nil and item.data or item,
             icon = item.icon,
+            preview = item.preview,
             color = item.color,
             right_icon = item.right_icon,
             right_color = item.right_color,
@@ -122,7 +123,9 @@ function EditorItemList:updateRenameBounds()
     local y = -(self.scroll_row - math.floor(self.scroll_row)) * self.row_height
         + (index - math.floor(self.scroll_row) - 1) * self.row_height
     local label_x = 6
-    if self.rename_item.icon then
+    if self.rename_item.preview then
+        label_x = self.row_height + 4
+    elseif self.rename_item.icon then
         local texture = Assets.getTexture(self.rename_item.icon)
         if texture then label_x = 6 + texture:getWidth() + 8 end
     end
@@ -317,7 +320,12 @@ function EditorItemList:drawSelf()
         end
         local item = self.filtered_items[index]
         local label_x = 6
-        if item.icon then
+        if item.preview and item.preview.drawPreviewIcon then
+            local padding = 4
+            local preview_size = self.row_height - padding * 2
+            item.preview:drawPreviewIcon(padding, y + padding, preview_size, preview_size, 0.9)
+            label_x = self.row_height + 4
+        elseif item.icon then
             local texture = Assets.getTexture(item.icon)
             if texture then
                 local icon_x = 6

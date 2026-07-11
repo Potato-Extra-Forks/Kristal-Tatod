@@ -8,6 +8,7 @@ function EditorScrollbar:init(options)
     self.value = MathUtils.clamp(options.value or 0, 0, 1)
     self.page = MathUtils.clamp(options.page or 0.2, 0, 1)
     self.on_changed = options.on_changed
+    self.horizontal = options.horizontal == true
     self.cursor_type = "select"
     self.dragging = false
     self.drag_offset = 0
@@ -21,29 +22,38 @@ function EditorScrollbar:setValue(value, silent)
 end
 
 function EditorScrollbar:getThumbRect()
-    local thumb_h = math.max(18, self.height * self.page)
-    thumb_h = math.min(self.height, thumb_h)
-    local travel = math.max(0, self.height - thumb_h)
-    return 0, travel * self.value, self.width, thumb_h
+    local length = self.horizontal and self.width or self.height
+    local thickness = self.horizontal and self.height or self.width
+    local thumb_length = math.min(length, math.max(18, length * self.page))
+    local position = math.max(0, length - thumb_length) * self.value
+    if self.horizontal then return position, 0, thumb_length, thickness end
+    return 0, position, thickness, thumb_length
 end
 
-function EditorScrollbar:onMousePressed(_, y, button)
+function EditorScrollbar:onMousePressed(x, y, button)
     if button ~= 1 then return false end
-    local _, thumb_y, _, thumb_h = self:getThumbRect()
-    if y >= thumb_y and y < thumb_y + thumb_h then
-        self.drag_offset = y - thumb_y
+    local thumb_x, thumb_y, thumb_w, thumb_h = self:getThumbRect()
+    local position = self.horizontal and x or y
+    local thumb_position = self.horizontal and thumb_x or thumb_y
+    local thumb_length = self.horizontal and thumb_w or thumb_h
+    local length = self.horizontal and self.width or self.height
+    if position >= thumb_position and position < thumb_position + thumb_length then
+        self.drag_offset = position - thumb_position
     else
-        self.drag_offset = thumb_h / 2
-        self:setValue((y - self.drag_offset) / math.max(1, self.height - thumb_h))
+        self.drag_offset = thumb_length / 2
+        self:setValue((position - self.drag_offset) / math.max(1, length - thumb_length))
     end
     self.dragging = true
     return true
 end
 
-function EditorScrollbar:onMouseMoved(_, y)
+function EditorScrollbar:onMouseMoved(x, y)
     if not self.dragging then return end
-    local _, _, _, thumb_h = self:getThumbRect()
-    self:setValue((y - self.drag_offset) / math.max(1, self.height - thumb_h))
+    local _, _, thumb_w, thumb_h = self:getThumbRect()
+    local position = self.horizontal and x or y
+    local thumb_length = self.horizontal and thumb_w or thumb_h
+    local length = self.horizontal and self.width or self.height
+    self:setValue((position - self.drag_offset) / math.max(1, length - thumb_length))
 end
 
 function EditorScrollbar:onMouseReleased(_, _, button)
@@ -53,8 +63,9 @@ function EditorScrollbar:onMouseReleased(_, _, button)
     end
 end
 
-function EditorScrollbar:onWheelMoved(_, y)
-    self:setValue(self.value - y * math.max(0.03, self.page * 0.25))
+function EditorScrollbar:onWheelMoved(x, y)
+    local movement = self.horizontal and (x ~= 0 and x or y) or y
+    self:setValue(self.value - movement * math.max(0.03, self.page * 0.25))
     return true
 end
 
@@ -63,7 +74,8 @@ function EditorScrollbar:drawSelf()
     love.graphics.rectangle("fill", 0, 0, self.width, self.height)
     local thumb_x, thumb_y, thumb_w, thumb_h = self:getThumbRect()
     love.graphics.setColor(self.dragging and 0.62 or 0.42, self.dragging and 0.65 or 0.44, self.dragging and 0.72 or 0.50, 1)
-    love.graphics.rectangle("fill", thumb_x + 2, thumb_y + 2, thumb_w - 4, math.max(1, thumb_h - 4), 2)
+    love.graphics.rectangle("fill", thumb_x + 2, thumb_y + 2,
+        math.max(1, thumb_w - 4), math.max(1, thumb_h - 4), 2)
 end
 
 return EditorScrollbar

@@ -41,13 +41,23 @@ end
 
 function EditorEvent:getPreviewSprite(sprite)
     local properties = self.data.properties or {}
-    sprite = sprite or self.editor_sprite
-    if not sprite and self.sprite_property then sprite = properties[self.sprite_property] end
-    if not sprite and self.getEditorSprite then
+    local candidates = { sprite }
+    if self.sprite_property then table.insert(candidates, properties[self.sprite_property]) end
+    if self.getEditorSprite then
         local success, result = pcall(self.getEditorSprite, self, self.data)
-        if success then sprite = result end
+        if success then table.insert(candidates, result) end
     end
-    return sprite
+    table.insert(candidates, self.editor_sprite)
+    for _, candidate in ipairs(candidates) do
+        if type(candidate) == "string" then
+            if Assets.getFramesOrTexture(candidate) then return candidate end
+            for _, direction in ipairs({ "down", "right", "left", "up" }) do
+                local directional = candidate .. "/" .. direction
+                if Assets.getFramesOrTexture(directional) then return directional end
+            end
+        end
+    end
+    return nil
 end
 
 function EditorEvent:getTexture()
@@ -85,6 +95,20 @@ function EditorEvent:draw(alpha)
     Draw.setColor(1, 1, 1, 1)
 end
 
+function EditorEvent:drawPreviewIcon(x, y, width, height, alpha)
+    local texture, marker = self:getTexture()
+    if not texture then return false end
+    alpha = alpha or 1
+    local texture_width, texture_height = texture:getDimensions()
+    local scale = math.min(width / texture_width, height / texture_height)
+    local color = marker and self.layer_color or { 1, 1, 1, 1 }
+    Draw.setColor(color[1] or 1, color[2] or 1, color[3] or 1, (color[4] or 1) * alpha)
+    Draw.draw(texture, x + width / 2, y + height / 2, 0, scale, scale,
+        texture_width / 2, texture_height / 2)
+    Draw.setColor(1, 1, 1, 1)
+    return true
+end
+
 function EditorEvent:drawBounds(alpha)
     if self.width == 0 and self.height == 0 then return end
     alpha = alpha or 1
@@ -96,7 +120,25 @@ function EditorEvent:drawBounds(alpha)
     love.graphics.setLineWidth(1)
     Draw.setColor(color[1] or 1, color[2] or 1, color[3] or 1,
         math.min(color[4] or 1, 0.9) * alpha)
-    love.graphics.rectangle("line", 0, 0, self.width, self.height)
+    if self.data.shape == "ellipse" then
+        love.graphics.ellipse("line", self.width / 2, self.height / 2, self.width / 2, self.height / 2)
+    elseif self.data.polygon and #self.data.polygon >= 3 then
+        local points = {}
+        for _, point in ipairs(self.data.polygon) do
+            table.insert(points, point.x or point[1] or 0)
+            table.insert(points, point.y or point[2] or 0)
+        end
+        love.graphics.polygon("line", points)
+    elseif self.data.polyline and #self.data.polyline >= 2 then
+        local points = {}
+        for _, point in ipairs(self.data.polyline) do
+            table.insert(points, point.x or point[1] or 0)
+            table.insert(points, point.y or point[2] or 0)
+        end
+        love.graphics.line(points)
+    else
+        love.graphics.rectangle("line", 0, 0, self.width, self.height)
+    end
     love.graphics.pop()
     love.graphics.setLineWidth(previous_width)
     Draw.setColor(1, 1, 1, 1)

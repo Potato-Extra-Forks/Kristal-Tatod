@@ -1,6 +1,6 @@
 local EditorChaserEnemy, super = Class(EditorEvent)
 
-EditorChaserEnemy.sprite_property = "sprite"
+EditorChaserEnemy.getEditorSprite = EditorNPC.getEditorSprite
 function EditorChaserEnemy:init(data, options)
     super.init(self, data, options)
     self:registerProperty("actor", "string")

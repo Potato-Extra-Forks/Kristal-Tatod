@@ -1,6 +1,6 @@
 local EDITOR_DEFAULT_WIDTH = 1280
 local EDITOR_DEFAULT_HEIGHT = 800
-local EDITOR_SESSION_VERSION = 1
+local EDITOR_SESSION_VERSION = 2
 local EDITOR_SESSION_DIRECTORY = "editor"
 local EDITOR_MUSIC = "edit"
 local EDITOR_MUSIC_VOLUME = 0.5
@@ -189,12 +189,16 @@ function Editor:captureSession()
         tile_grid = self.show_tile_grid,
         standalone_preview_enabled = self:isStandaloneGamePreviewEnabled(),
         standalone_preview_map_id = self.standalone_preview_map_id,
+        active_tileset_id = self.active_tileset_id,
+        tile_palette_random = self.tile_palette and self.tile_palette.random_mode or false,
         active_panel_id = self.active_document and self.active_document.panel.id,
         preferences = {
             custom_cursors = self.use_custom_cursors,
             deltarune_font = self.use_deltarune_font,
-            editor_music = self.editor_music_enabled
+            editor_music = self.editor_music_enabled,
+            darken_unselected_layers = self.darken_unselected_layers
         },
+        settings = self.settings and self.settings:getStoredValues() or {},
         documents = {},
         layout = self:captureLayout(),
         window = { width = love.graphics.getWidth(), height = love.graphics.getHeight() }
@@ -204,6 +208,11 @@ function Editor:captureSession()
         local saved_document = {
             panel_id = document.panel.id,
             primary_map_id = document.primary_map_id,
+            world_id = document.world and document.world.id,
+            primary_position = document:getPrimaryMap() and {
+                x = document:getPrimaryMap().x,
+                y = document:getPrimaryMap().y
+            } or nil,
             maps = {},
             view = {
                 canvas_x = view.canvas_x,
@@ -272,7 +281,7 @@ function Editor:setupWindow(session)
     editor_flags.resizable = true
     editor_flags.minwidth = math.min(editor_width, SCREEN_WIDTH + 570)
     editor_flags.minheight = math.min(editor_height,
-        SCREEN_HEIGHT + EditorMenuBar.HEIGHT + EditorMessageBar.HEIGHT + 28)
+        SCREEN_HEIGHT + EditorMenuBar.HEIGHT + EditorMessageBar.HEIGHT + 100)
     love.window.updateMode(fromPixels(editor_width), fromPixels(editor_height), editor_flags)
     self:centerWindow(display, desktop_width, desktop_height)
     Kristal.refreshWindowText()
@@ -282,6 +291,17 @@ function Editor:setupWindow(session)
 end
 
 function Editor:registerMenuBar()
+    self.menu_bar:registerItem("edit", "undo", "Undo", {
+        is_enabled = function() return self.history:canUndo() end,
+        on_activate = function() self:undo() end
+    })
+    self.menu_bar:registerItem("edit", "redo", "Redo", {
+        is_enabled = function() return self.history:canRedo() end,
+        on_activate = function() self:redo() end
+    })
+    self.menu_bar:registerItem("edit", "settings", "Editor Settings...", {
+        on_activate = function() self:showSettingsPanel() end
+    })
     self.menu_bar:registerToggle("edit", "tile_editing", "Map Editing View (Tab)",
         function() return self.tile_editing_mode end,
         function(enabled) self:setTileEditingMode(enabled) end)
@@ -319,6 +339,171 @@ function Editor:registerMenuBar()
     end)
 end
 
+function Editor:registerEditorTools()
+    self.tool_registry = EditorToolRegistry()
+    self.tool_registry:register("select", { name = "Select", icon = "editor/ui/tool/select" })
+    self.tool_registry:register("shape", { name = "Shape", icon = "editor/ui/tool/shape_rect" })
+    self.tool_registry:register("tile_brush", { name = "Tile Brush", short_name = "Brush", icon = "editor/ui/tool/brush" })
+    self.tool_registry:register("tile_fill", { name = "Tile Fill", short_name = "Fill", icon = "editor/ui/tool/bucket" })
+    self.tool_registry:register("eraser", { name = "Eraser", icon = "editor/ui/tool/eraser" })
+    self.tool_registry:register("link", { name = "Link Objects", short_name = "Link", icon = "editor/ui/tool/link" })
+    self.active_tool = "select"
+    self.shape_mode = "rectangle"
+end
+
+function Editor:registerEditorSettings(session)
+    local stored = TableUtils.copy(session and session.settings or {}, true)
+    local legacy = session and session.preferences or {}
+    if stored["appearance.custom_cursors"] == nil and legacy.custom_cursors ~= nil then
+        stored["appearance.custom_cursors"] = legacy.custom_cursors
+    end
+    if stored["appearance.font"] == nil and legacy.deltarune_font ~= nil then
+        stored["appearance.font"] = legacy.deltarune_font ~= false and "deltarune" or "default"
+    end
+    if stored["appearance.editor_music"] == nil and legacy.editor_music ~= nil then
+        stored["appearance.editor_music"] = legacy.editor_music
+    end
+    if stored["appearance.darken_unselected"] == nil and legacy.darken_unselected_layers ~= nil then
+        stored["appearance.darken_unselected"] = legacy.darken_unselected_layers
+    end
+
+    self.settings = EditorSettingsRegistry(self, stored)
+    self.settings:registerPage("appearance", "Appearance")
+    self.settings:registerSetting("appearance", "appearance.font", {
+        name = "Editor Font", type = "choice", default = "deltarune",
+        choices = { { value = "deltarune", label = "Deltarune" }, { value = "default", label = "System Default" } },
+        set = function(value, editor) editor.use_deltarune_font = value == "deltarune" end
+    })
+    self.settings:registerSetting("appearance", "appearance.font_scale", {
+        name = "Font Scale", type = "number", default = 1, minimum = 0.5, maximum = 3,
+        description = "Scales fonts throughout editor panels.",
+        set = function(value, editor) editor.font_scale = value end
+    })
+    self.settings:registerSetting("appearance", "appearance.custom_cursors", {
+        name = "Use Custom Cursors", type = "boolean", default = true,
+        set = function(value, editor)
+            editor.use_custom_cursors = value
+            if editor.editor_cursor then editor.editor_cursor:setCustomEnabled(value) end
+        end
+    })
+    self.settings:registerSetting("appearance", "appearance.darken_unselected", {
+        name = "Darken Unselected Layers", type = "boolean", default = true,
+        set = function(value, editor)
+            editor.darken_unselected_layers = value
+            if editor.layers_browser and editor.layers_browser.darken_toggle then
+                editor.layers_browser.darken_toggle:setValue(value, true)
+            end
+        end
+    })
+    self.settings:registerSetting("appearance", "appearance.editor_music", {
+        name = "Editor Music", type = "boolean", default = true,
+        set = function(value, editor)
+            editor.editor_music_enabled = value
+            if editor.editing_music then editor:syncEditingMusic() end
+        end
+    })
+
+    self.settings:registerPage("editing", "Editing")
+    self.settings:registerSetting("editing", "editing.history_limit", {
+        name = "Undo History Limit", type = "integer", default = EditorHistory.DEFAULT_LIMIT,
+        minimum = 1, maximum = 10000,
+        description = "Maximum completed edit commands retained in memory.",
+        get = function(editor) return editor.history:getLimit() end,
+        set = function(value, editor) return editor.history:setLimit(value) end
+    })
+
+    self.settings:registerPage("keybinds", "Keybinds")
+    local function keybind(id, name, alias)
+        self.settings:registerSetting("keybinds", id, {
+            name = name, type = "keybind", persistent = false, apply_initial = false,
+            get = function() return Input.getPrimaryBind(alias, false) end,
+            set = function(value)
+                if not Input.setBind(alias, 1, value, false) then return false end
+                Input.saveBinds()
+                return true
+            end
+        })
+    end
+    keybind("keybinds.toggle_editor", "Toggle Editor", "editor")
+    keybind("keybinds.toggle_map_view", "Toggle Map/Game View", "editor_view")
+end
+
+function Editor:setupTilesetDocuments(session)
+    self.tileset_documents = {}
+    local ids = {}
+    for id in pairs(Registry.tilesets or {}) do table.insert(ids, id) end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+        table.insert(self.tileset_documents, EditorTilesetDocument(self, id, Registry.getTileset(id)))
+    end
+    local desired = session and session.active_tileset_id
+    self.active_tileset_document = nil
+    for _, document in ipairs(self.tileset_documents) do
+        if document.id == desired then self.active_tileset_document = document break end
+    end
+    self.active_tileset_document = self.active_tileset_document or self.tileset_documents[1]
+    self.active_tileset_id = self.active_tileset_document and self.active_tileset_document.id or nil
+end
+
+function Editor:setActiveTileset(document)
+    if type(document) == "string" then
+        for _, candidate in ipairs(self.tileset_documents or {}) do
+            if candidate.id == document then document = candidate break end
+        end
+    end
+    if not document or not document.data then return false end
+    self.active_tileset_document = document
+    self.active_tileset_id = document.id
+    if self.tileset_panel then
+        self.tileset_panel.title = "Tileset Editor" .. (document:isDirty() and " *" or "")
+    end
+    if self.tile_palette then self.tile_palette:setTilesetDocument(document) end
+    if self.tileset_editor and self.tileset_panel and self.tileset_panel.visible then
+        self.tileset_editor:setDocument(document)
+    end
+    return true
+end
+
+function Editor:setSelectedTile(tile)
+    self.selected_tile = tile
+    if self.tile_palette then self.tile_palette:setSelectedTile(tile) end
+    if self.tileset_editor then self.tileset_editor:setTile(tile) end
+end
+
+function Editor:showTilesetEditor(document)
+    if document then self:setActiveTileset(document) end
+    if not self.tileset_panel then return false end
+    if not self.tileset_panel.visible then self.dockspace:setPanelVisible(self.tileset_panel, true, "center") end
+    self.tileset_editor:setDocument(self.active_tileset_document)
+    if self.selected_tile then self.tileset_editor:setTile(self.selected_tile) end
+    if self.tileset_panel.stack then self.tileset_panel.stack:setActivePanel(self.tileset_panel) end
+    self.dockspace:setFocus(self.tileset_editor)
+    return true
+end
+
+function Editor:warnTilesetVisualOnly()
+    self:addWarning("Tileset changes are visual-only until the editor tileset format and save pass are implemented",
+        nil, "tileset_editing")
+end
+
+function Editor:setShapeMode(mode)
+    local modes = { point = true, line = true, rectangle = true, ellipse = true, polygon = true }
+    if not modes[mode] then return false end
+    self.shape_mode = mode
+    self:setActiveTool("shape")
+    return true
+end
+
+function Editor:getShapeModes()
+    return {
+        { id = "point", name = "Point", icon = "editor/ui/tool/shape_point" },
+        { id = "line", name = "Line", icon = "editor/ui/tool/shape_line" },
+        { id = "rectangle", name = "Rectangle", icon = "editor/ui/tool/shape_rect" },
+        { id = "ellipse", name = "Ellipse", icon = "editor/ui/tool/shape_ellipse" },
+        { id = "polygon", name = "Polygon", icon = "editor/ui/tool/shape_poly" }
+    }
+end
+
 function Editor:setupMapDocuments(session)
     local restored_by_panel = {}
     local saved_documents = session and type(session.documents) == "table" and session.documents or {}
@@ -327,6 +512,11 @@ function Editor:setupMapDocuments(session)
             and not self:findMapDocument(saved_document.primary_map_id) then
             local document = self:createMapDocument(saved_document.primary_map_id, saved_document.panel_id)
             if document then
+                if type(saved_document.world_id) == "string" then document.world.id = saved_document.world_id end
+                if type(saved_document.primary_position) == "table" then
+                    document:setMapPosition(saved_document.primary_map_id,
+                        saved_document.primary_position.x, saved_document.primary_position.y)
+                end
                 restored_by_panel[document.panel.id] = document
                 local saved_maps = type(saved_document.maps) == "table" and saved_document.maps or {}
                 for _, saved_map in ipairs(saved_maps) do
@@ -368,6 +558,33 @@ function Editor:setupPanels(session)
         preferred_width = 260,
         recoverable = true
     }), "left")
+    self.tilesets_browser_panel = self.dockspace:registerPanel(EditorPanel(
+        "tilesets_browser", "Tilesets", self.tileset_browser, {
+            minimum_width = 180, preferred_width = 260, recoverable = true
+        }), self.maps_panel.stack)
+    self.maps_panel.stack:setActivePanel(self.maps_panel)
+    self.events_panel = self.dockspace:registerPanel(EditorPanel("events", "Events", self.event_browser, {
+        minimum_width = 180,
+        minimum_height = 160,
+        preferred_width = 260,
+        preferred_height = 300,
+        recoverable = true
+    }), "left")
+    self.dockspace:dockPanelSplit(self.events_panel, self.maps_panel.stack, "bottom")
+    self.fx_panel = self.dockspace:registerPanel(EditorPanel("draw_fx", "DrawFX", self.fx_browser, {
+        minimum_width = 200,
+        minimum_height = 180,
+        preferred_width = 280,
+        preferred_height = 300,
+        recoverable = true
+    }), self.events_panel.stack)
+    self.events_panel.stack:setActivePanel(self.events_panel)
+    self.toolbar_panel = self.dockspace:registerPanel(EditorPanel("toolbar", "Tools", self.toolbar, {
+        minimum_width = 360,
+        minimum_height = 36,
+        preferred_height = 72,
+        recoverable = true
+    }), "top")
     self.layers_panel = self.dockspace:registerPanel(EditorPanel("layers", "Layers", self.layers_browser, {
         minimum_width = 220,
         minimum_height = 360,
@@ -383,6 +600,46 @@ function Editor:setupPanels(session)
             recoverable = true
         }), "right")
     self.dockspace:dockPanelSplit(self.properties_panel, self.layers_panel.stack, "bottom")
+    self.console_panel = self.dockspace:registerPanel(EditorPanel("console", "Console", self.console_browser, {
+        minimum_width = 360,
+        minimum_height = 140,
+        preferred_height = 260,
+        recoverable = true
+    }), "bottom")
+    self.tile_palette_panel = self.dockspace:registerPanel(EditorPanel(
+        "tile_palette", "Tile Palette", self.tile_palette, {
+            minimum_width = 360,
+            minimum_height = 150,
+            preferred_height = 240,
+            recoverable = true
+        }), self.console_panel.stack)
+    self.console_panel.stack:setActivePanel(self.console_panel)
+    self.tileset_panel = self.dockspace:registerPanel(EditorPanel(
+        "tileset_editor", "Tileset Editor", self.tileset_editor, {
+            visible = false,
+            minimum_width = 440,
+            minimum_height = 300,
+            preferred_width = 760,
+            preferred_height = 520,
+            recoverable = true
+        }), "center")
+    self.diagnostics_panel = self.dockspace:registerPanel(EditorPanel(
+        "diagnostics", "Warnings and Errors", self.diagnostics_browser, {
+            visible = false,
+            minimum_width = 360,
+            minimum_height = 140,
+            preferred_height = 260,
+            recoverable = true
+        }), "bottom")
+    self.settings_panel = self.dockspace:registerPanel(EditorPanel("settings", "Editor Settings",
+        self.settings_browser, {
+            visible = false,
+            minimum_width = 520,
+            minimum_height = 360,
+            preferred_width = 760,
+            preferred_height = 540,
+            recoverable = true
+        }), "center")
     self.game_preview_panel = self.dockspace:registerPanel(EditorPanel(
         "game_preview", "Game Preview", self.game_preview, {
             visible = true,
@@ -401,6 +658,8 @@ function Editor:setupPanels(session)
     EditorPlugins:createPanels(self)
     self.dockspace.sizes.left = 260
     self.dockspace.sizes.right = 300
+    self.dockspace.sizes.top = 72
+    self.dockspace.sizes.bottom = 260
     self.dockspace.minimum_center_width = SCREEN_WIDTH
     self.dockspace.minimum_center_height = SCREEN_HEIGHT + 28
     self.menu_bar:setBounds(0, 0, love.graphics.getWidth())
@@ -411,6 +670,8 @@ function Editor:setupPanels(session)
     self.default_layout = self:captureLayout()
     if session and type(session.layout) == "table" then
         local had_properties_panel = session.layout.panels and session.layout.panels.properties
+        local had_events_panel = session.layout.panels and session.layout.panels.events
+        local had_tilesets_browser = session.layout.panels and session.layout.panels.tilesets_browser
         local saved_layout = TableUtils.copy(session.layout, true)
         if saved_layout.panels and saved_layout.panels.game_preview then
             saved_layout.panels.game_preview.visible = session.standalone_preview_enabled ~= false
@@ -422,6 +683,24 @@ function Editor:setupPanels(session)
                 nil, "editor_session")
         elseif not had_properties_panel then
             self.dockspace:dockPanelSplit(self.properties_panel, self.layers_panel.stack, "bottom")
+        end
+        if restored and not had_events_panel and self.maps_panel.stack then
+            self.dockspace:dockPanelSplit(self.events_panel, self.maps_panel.stack, "bottom")
+        end
+        if restored and not had_tilesets_browser and self.maps_panel.stack then
+            self.maps_panel.stack:setActivePanel(self.maps_panel)
+        end
+        if restored and (session.version or 1) < 2 then
+            if not self.fx_panel.visible then self.dockspace:setPanelVisible(self.fx_panel, true, "left") end
+            self.dockspace:dockPanel(self.fx_panel, self.events_panel.stack)
+            self.events_panel.stack:setActivePanel(self.events_panel)
+            if not self.console_panel.visible then
+                self.dockspace:setPanelVisible(self.console_panel, true, "bottom")
+            end
+            local bottom_stack = self.tile_palette_panel.stack or self.console_panel.stack
+            bottom_stack:addPanel(self.console_panel, 1)
+            bottom_stack:setActivePanel(self.console_panel)
+            self.dockspace:layout()
         end
     end
 end
@@ -470,12 +749,12 @@ function Editor:enter(previous, options)
     self.project_id = options.project_id or (Mod and Mod.info.id)
     self.map_id = options.map_id or (Game.world and Game.world.map and Game.world.map.id)
     self.message_bar = EditorMessageBar()
+    self.history = EditorHistory(self)
+    self:registerEditorTools()
     local session = self:loadSession()
-    local preferences = session and type(session.preferences) == "table" and session.preferences or {}
+    self:registerEditorSettings(session)
+    self:setupTilesetDocuments(session)
     self.show_tile_grid = session and session.tile_grid == true or false
-    self.use_custom_cursors = preferences.custom_cursors ~= false
-    self.use_deltarune_font = preferences.deltarune_font ~= false
-    self.editor_music_enabled = preferences.editor_music ~= false
     self.previous_lock_movement = Game.lock_movement
     self.game_preview_movement_lock = self.previous_lock_movement
     self.game_preview_lock_before_pause = nil
@@ -488,15 +767,31 @@ function Editor:enter(previous, options)
     self.map_documents = {}
     self.active_document = nil
     self.game_view = nil
+    self.selected_map_object = nil
+    self.selected_map_objects = {}
     self.map_browser = EditorMapBrowser(self)
+    self.event_browser = EditorEventBrowser(self)
+    self.tileset_browser = EditorTilesetBrowser(self)
+    self.tile_palette = EditorTilePalette(self)
+    self.tileset_editor = EditorTilesetPanel(self)
+    self.tile_palette.random_mode = session and session.tile_palette_random == true or false
+    self.tile_palette.random_toggle:setValue(self.tile_palette.random_mode, true)
+    self.tile_palette:setTilesetDocument(self.active_tileset_document)
     self.layers_browser = EditorLayersPanel(self)
     self.properties_browser = EditorPropertiesPanel(self)
+    self.fx_browser = EditorFXBrowser(self)
+    self.toolbar = EditorToolbar(self)
+    self.diagnostics_browser = EditorDiagnosticsPanel(self)
+    self.console_browser = EditorConsolePanel(self)
     self.menu_bar = EditorMenuBar(self)
     self.editor_cursor = EditorCursor()
     self.editor_cursor:setCustomEnabled(self.use_custom_cursors)
 
     local context_document, restored_by_panel = self:setupMapDocuments(session)
     EditorPlugins:initialize(self)
+    self.settings_browser = EditorSettingsPanel(self)
+    self.event_browser:refresh()
+    self.fx_browser:refresh()
     self:registerMenuBar()
     EditorPlugins:applyMenuBar(self)
     self:setupPanels(session)
@@ -546,6 +841,38 @@ function Editor:leave()
     self.game_preview_panel = nil
     self.layers_browser = nil
     self.layers_panel = nil
+    self.event_browser = nil
+    self.events_panel = nil
+    self.tileset_documents = nil
+    self.active_tileset_document = nil
+    self.active_tileset_id = nil
+    self.selected_tile = nil
+    self.tileset_browser = nil
+    self.tilesets_browser_panel = nil
+    self.tile_palette = nil
+    self.tile_palette_panel = nil
+    self.tileset_editor = nil
+    self.tileset_panel = nil
+    self.fx_browser = nil
+    self.fx_panel = nil
+    self.toolbar = nil
+    self.toolbar_panel = nil
+    self.tool_registry = nil
+    self.active_tool = nil
+    self.placement_event_id = nil
+    self.diagnostics_browser = nil
+    self.diagnostics_panel = nil
+    self.console_browser = nil
+    self.console_panel = nil
+    self.settings_browser = nil
+    self.settings_panel = nil
+    self.settings = nil
+    self.asset_drag = nil
+    self.drag_preview = nil
+    self.object_reference_drag = nil
+    self.selected_map_object = nil
+    self.selected_map_objects = nil
+    self.history = nil
     self.properties_browser = nil
     self.properties_panel = nil
     self.properties_target_owner = nil
@@ -586,16 +913,28 @@ function Editor:clearPropertiesTarget(owner)
 end
 
 function Editor:setCustomCursorsEnabled(enabled)
-    self.use_custom_cursors = enabled ~= false
-    if self.editor_cursor then self.editor_cursor:setCustomEnabled(self.use_custom_cursors) end
+    enabled = enabled ~= false
+    if self.settings and self.settings:getSetting("appearance.custom_cursors") then
+        return self.settings:setValue("appearance.custom_cursors", enabled)
+    end
+    self.use_custom_cursors = enabled
+    if self.editor_cursor then self.editor_cursor:setCustomEnabled(enabled) end
 end
 
 function Editor:setDeltaruneFontEnabled(enabled)
-    self.use_deltarune_font = enabled ~= false
+    enabled = enabled ~= false
+    if self.settings and self.settings:getSetting("appearance.font") then
+        return self.settings:setValue("appearance.font", enabled and "deltarune" or "default")
+    end
+    self.use_deltarune_font = enabled
 end
 
 function Editor:setEditingMusicEnabled(enabled)
-    self.editor_music_enabled = enabled ~= false
+    enabled = enabled ~= false
+    if self.settings and self.settings:getSetting("appearance.editor_music") then
+        return self.settings:setValue("appearance.editor_music", enabled)
+    end
+    self.editor_music_enabled = enabled
     self:syncEditingMusic()
 end
 
@@ -613,6 +952,525 @@ end
 
 function Editor:clearDiagnostics(source)
     self.message_bar:clear(source)
+end
+
+function Editor:showDiagnosticsPanel()
+    if not self.diagnostics_panel then return false end
+    if not self.diagnostics_panel.visible then
+        self.dockspace:setPanelVisible(self.diagnostics_panel, true, "bottom")
+    end
+    if self.diagnostics_panel.stack then self.diagnostics_panel.stack:setActivePanel(self.diagnostics_panel) end
+    self.dockspace:setFocus(self.diagnostics_browser)
+    return true
+end
+
+function Editor:toggleDiagnosticsPanel()
+    if not self.diagnostics_panel then return false end
+    if self.dockspace:isPanelDisplayed(self.diagnostics_panel) then
+        self.dockspace:setPanelVisible(self.diagnostics_panel, false)
+        return true
+    end
+    return self:showDiagnosticsPanel()
+end
+
+function Editor:showSettingsPanel()
+    if not self.settings_panel then return false end
+    if not self.settings_panel.visible then
+        self.dockspace:setPanelVisible(self.settings_panel, true, "center")
+    end
+    if self.settings_panel.stack then self.settings_panel.stack:setActivePanel(self.settings_panel) end
+    self.dockspace:setFocus(self.settings_browser.pages)
+    return true
+end
+
+function Editor:setActiveTool(id)
+    if not self.tool_registry:get(id) then return false end
+    self.active_tool = id
+    self.placement_event_id = nil
+    return true
+end
+
+function Editor:beginHistoryTransaction(label, owners)
+    return self.history and self.history:begin(label, owners)
+end
+
+function Editor:markHistoryChanged()
+    return self.history and self.history:markChanged()
+end
+
+function Editor:commitHistoryTransaction()
+    return self.history and self.history:commit()
+end
+
+function Editor:cancelHistoryTransaction()
+    if self.history then self.history:cancel() end
+end
+
+function Editor:performHistoryEdit(label, owners, callback)
+    if not self.history then return callback() end
+    return self.history:perform(label, owners, callback)
+end
+
+function Editor:undo()
+    return self.history and self.history:undo() or false
+end
+
+function Editor:redo()
+    return self.history and self.history:redo() or false
+end
+
+function Editor:onHistoryChanged(owners, restored)
+    self.discard_changes_confirmed = false
+    self:clearDiagnostics("unsaved_exit")
+    if restored then self:selectMapObjects({}) end
+    for _, owner in ipairs(owners or {}) do
+        owner.discard_close_confirmed = false
+        if owner.panel then
+            owner.panel.title = owner.primary_map_id .. (owner:isDirty() and " *" or "")
+        end
+        if restored and self.active_document == owner and self.layers_browser then
+            self.layers_browser:setDocument(nil)
+            self.layers_browser:setDocument(owner)
+        end
+        if owner == self.active_tileset_document then
+            if self.tileset_panel then
+                self.tileset_panel.title = "Tileset Editor" .. (owner:isDirty() and " *" or "")
+            end
+            if restored then
+                self.tile_palette:setTilesetDocument(nil)
+                self.tile_palette:setTilesetDocument(owner)
+                self.tileset_editor:setDocument(owner)
+            end
+        end
+    end
+    self:clearDiagnostics("unsaved_changes")
+    local dirty = 0
+    for _, document in ipairs(self.map_documents or {}) do
+        if document:isDirty() then dirty = dirty + 1 end
+    end
+    for _, document in ipairs(self.tileset_documents or {}) do
+        if document:isDirty() then dirty = dirty + 1 end
+    end
+    if dirty > 0 then
+        self:addWarning(string.format("%d editor document%s contain unsaved changes",
+            dirty, dirty == 1 and "" or "s"),
+            "Map and tileset serialization are not implemented yet; changes remain in the current editor working state.",
+            "unsaved_changes")
+    end
+end
+
+function Editor:hasUnsavedChanges()
+    for _, document in ipairs(self.map_documents or {}) do
+        if document:isDirty() then return true end
+    end
+    for _, document in ipairs(self.tileset_documents or {}) do
+        if document:isDirty() then return true end
+    end
+    return false
+end
+
+function Editor:setPlacementEvent(id)
+    if not Registry.getEditorEvent(id) then return false end
+    self.placement_event_id = id
+    self.active_tool = "select"
+    return true
+end
+
+function Editor:beginAssetDrag(kind, id, label)
+    self.asset_drag = { kind = kind, id = id, label = label or id }
+    local icon
+    if kind == "drawfx" then icon = "editor/ui/tool/brush" end
+    self:beginDragPreview(kind, label or id, icon, id)
+    return true
+end
+
+function Editor:beginDragPreview(kind, label, icon, data)
+    self.drag_preview = { kind = kind, label = label, icon = icon, data = data }
+    if kind == "event" then
+        local success, event = pcall(Registry.createEditorEvent, data,
+            { x = 0, y = 0, properties = {} }, {})
+        if success then self.drag_preview.event = event end
+    end
+    return true
+end
+
+function Editor:updateDragPreview(x, y)
+    if not self.drag_preview then return false end
+    self.drag_preview.x, self.drag_preview.y = x, y
+    return true
+end
+
+function Editor:finishDragPreview()
+    self.drag_preview = nil
+end
+
+function Editor:updateAssetDrag(x, y)
+    if not self.asset_drag then return false end
+    self.asset_drag.x, self.asset_drag.y = x, y
+    self:updateDragPreview(x, y)
+    return true
+end
+
+function Editor:getMapViewAt(x, y)
+    for _, document in ipairs(self.map_documents or {}) do
+        local panel = document.panel
+        if panel and panel.content == document.map_view and self.dockspace:isPanelDisplayed(panel)
+            and document.map_view:containsPoint(x, y) then
+            return document.map_view
+        end
+    end
+end
+
+function Editor:getMapObjectAtScreen(x, y)
+    local view = self:getMapViewAt(x, y)
+    if not view then return nil end
+    local local_x, local_y = view:toLocal(x, y)
+    local world_x, world_y = view:getMapCoordinates(local_x, local_y)
+    return view.document:findObjectAt(world_x, world_y), view, world_x, world_y
+end
+
+function Editor:addMapToWorldAtScreen(id, x, y)
+    local view = self:getMapViewAt(x, y)
+    if not view then return false end
+    local local_x, local_y = view:toLocal(x, y)
+    local world_x, world_y = view:getMapCoordinates(local_x, local_y)
+    local primary = view.document:getPrimaryMap()
+    if not Input.ctrl() then
+        local tile_width, tile_height = primary.tile_width or 40, primary.tile_height or 40
+        world_x = MathUtils.round(world_x / tile_width) * tile_width
+        world_y = MathUtils.round(world_y / tile_height) * tile_height
+    end
+    self:beginHistoryTransaction("Add Map to World", view.document)
+    local entry = view.document:addMap(id, world_x, world_y, { explicit_companion = true })
+    if entry then
+        view.document.world.id = view.document.world.id or ("session:" .. view.document.primary_map_id)
+        self:markHistoryChanged()
+        self:commitHistoryTransaction()
+        return true
+    end
+    self:cancelHistoryTransaction()
+    return false
+end
+
+function Editor:finishAssetDrag(x, y)
+    local drag = self.asset_drag
+    self.asset_drag = nil
+    self:finishDragPreview()
+    if not drag then return false end
+    local selection, view, world_x, world_y = self:getMapObjectAtScreen(x, y)
+    if drag.kind == "drawfx" then
+        if not selection then
+            self:addWarning("Drop DrawFX onto an event or shape", nil, "drawfx_drop")
+            return false
+        end
+        self:selectMapObject(selection)
+        return self:applyDrawFXToSelection(drag.id)
+    elseif drag.kind == "event" and view then
+        return self:placeEvent(view, drag.id, world_x, world_y)
+    end
+    return false
+end
+
+function Editor:placeEvent(view, event_id, world_x, world_y)
+    self:beginHistoryTransaction("Place Event", view.document)
+    local object, layer_or_reason, map_id = view.document:addEditorObject(event_id, nil, world_x, world_y)
+    if not object then
+        self:cancelHistoryTransaction()
+        self:addWarning(layer_or_reason, nil, "event_placement")
+        return false
+    end
+    self:clearDiagnostics("event_placement")
+    local selection = view.document:getObjectSelection(map_id, layer_or_reason, object)
+    selection.view = view
+    self:selectMapObject(selection)
+    self:markHistoryChanged()
+    self:commitHistoryTransaction()
+    return true
+end
+
+function Editor:getMapObjectPropertiesTarget(selection)
+    local data = selection.data
+    data.properties = data.properties or {}
+    data.__editor_property_types = data.__editor_property_types or {}
+    local event_id = data.type or data.class
+    if event_id == nil or event_id == "" then event_id = data.name end
+    local layer_type = Registry.getLayerType(selection.layer._editor_type_id)
+    local editor_event = Registry.createEditorEvent(event_id, data, {
+        depth = selection.layer._editor_depth_override or 0,
+        layer_uid = selection.layer._editor_uid,
+        layer = selection.layer,
+        layer_type = layer_type,
+        layer_color = Registry.layer_types:getLayerColor(selection.layer, layer_type),
+        map_id = selection.map_id,
+        map_data = Registry.getMapData(selection.map_id)
+    })
+    data.__editor_fx = data.__editor_fx or {}
+    local fx_sections = {}
+    for index, assignment in ipairs(data.__editor_fx) do
+        if type(assignment) == "string" then
+            assignment = { id = assignment, properties = {}, __editor_property_types = {} }
+            data.__editor_fx[index] = assignment
+        end
+        local definition = Registry.getEditorDrawFX(assignment.id)
+        if definition then
+            local current_assignment = assignment
+            local fx = Registry.createEditorDrawFX(assignment.id, assignment)
+            table.insert(fx_sections, {
+                title = fx:getName(),
+                property_set = fx.property_set,
+                on_changed = function() selection.document:invalidatePreview(selection.map_id) end,
+                on_remove = function()
+                    self:performHistoryEdit("Remove DrawFX", selection.document, function()
+                        return TableUtils.removeValue(data.__editor_fx, current_assignment) ~= nil
+                    end)
+                    self:setPropertiesTarget(self:getMapObjectPropertiesTarget(selection), self)
+                end
+            })
+        end
+    end
+    local function numberField(label, key)
+        return {
+            label = label,
+            get = function() return data[key] or 0 end,
+            set = function(value)
+                local number = tonumber(value)
+                if not number then return false end
+                data[key] = number
+                selection.document:invalidatePreview(selection.map_id)
+                return true
+            end
+        }
+    end
+    return {
+        title = event_id and (StringUtils.titleCase(tostring(event_id):gsub("[/_]", " "))) or "Map Object",
+        history_owner = selection.document,
+        fields = {
+            numberField("X", "x"), numberField("Y", "y"),
+            numberField("Width", "width"), numberField("Height", "height"),
+            numberField("Rotation", "rotation"),
+            {
+                label = "DrawFX",
+                get = function()
+                    local ids = {}
+                    for _, assignment in ipairs(data.__editor_fx or {}) do
+                        table.insert(ids, type(assignment) == "table" and assignment.id or assignment)
+                    end
+                    return table.concat(ids, ", ")
+                end,
+                set = function() return false end,
+                readonly = true
+            }
+        },
+        properties = data.properties,
+        property_types = data.__editor_property_types,
+        property_set = editor_event.property_set,
+        fx_sections = fx_sections,
+        on_changed = function() selection.document:invalidatePreview(selection.map_id) end
+    }
+end
+
+function Editor:isMapObjectSelected(selection)
+    if not selection then return false end
+    for _, candidate in ipairs(self.selected_map_objects or {}) do
+        if candidate.document == selection.document and candidate.data == selection.data then return true end
+    end
+    return false
+end
+
+function Editor:getSelectedMapObjects(document)
+    local result = {}
+    for _, selection in ipairs(self.selected_map_objects or {}) do
+        if not document or selection.document == document then table.insert(result, selection) end
+    end
+    return result
+end
+
+function Editor:getMapObjectBatchPropertiesTarget(selections)
+    local function sharedValue(key)
+        local value = selections[1] and (selections[1].data[key] or 0) or 0
+        for index = 2, #selections do
+            if (selections[index].data[key] or 0) ~= value then return "" end
+        end
+        return value
+    end
+    local function batchNumberField(label, key)
+        return {
+            label = label,
+            placeholder = "Mixed",
+            get = function() return sharedValue(key) end,
+            set = function(value)
+                local number = tonumber(value)
+                if not number then return false end
+                local invalidated = {}
+                for _, selection in ipairs(selections) do
+                    selection.data[key] = number
+                    invalidated[selection.map_id] = selection.document
+                end
+                for map_id, document in pairs(invalidated) do document:invalidatePreview(map_id) end
+                return true
+            end
+        }
+    end
+    return {
+        title = tostring(#selections) .. " Objects",
+        history_owner = selections[1] and selections[1].document,
+        fields = { batchNumberField("Rotation", "rotation") }
+    }
+end
+
+function Editor:selectMapObjects(selections, primary)
+    local unique, result = {}, {}
+    for _, selection in ipairs(selections or {}) do
+        local key = selection.document and tostring(selection.document) .. ":" .. tostring(selection.data)
+        if selection.data and not unique[key] then
+            unique[key] = true
+            table.insert(result, selection)
+        end
+    end
+    if primary then
+        for index, selection in ipairs(result) do
+            if selection.document == primary.document and selection.data == primary.data then
+                table.remove(result, index)
+                table.insert(result, 1, selection)
+                break
+            end
+        end
+    end
+    self.selected_map_objects = result
+    self.selected_map_object = result[1]
+    if #result == 1 then
+        self:setPropertiesTarget(self:getMapObjectPropertiesTarget(result[1]), self)
+    elseif #result > 1 then
+        self:setPropertiesTarget(self:getMapObjectBatchPropertiesTarget(result), self)
+    else
+        self:clearPropertiesTarget(self)
+    end
+    return #result > 0
+end
+
+function Editor:selectMapObject(selection, additive)
+    if not additive then return self:selectMapObjects(selection and { selection } or {}, selection) end
+    local selections = self:getSelectedMapObjects()
+    local found
+    for index, candidate in ipairs(selections) do
+        if candidate.document == selection.document and candidate.data == selection.data then
+            table.remove(selections, index)
+            found = true
+            break
+        end
+    end
+    if not found then table.insert(selections, selection) end
+    return self:selectMapObjects(selections, found and nil or selection)
+end
+
+function Editor:deleteSelectedMapObject(explode)
+    local selections = self:getSelectedMapObjects()
+    if #selections == 0 then return false end
+    local owners = {}
+    for _, selection in ipairs(selections) do table.insert(owners, selection.document) end
+    self:beginHistoryTransaction(explode and "Explode Objects" or "Delete Objects", owners)
+    local removed = false
+    for _, selection in ipairs(selections) do
+        if explode and selection.view then
+            local x, y = selection.document:getObjectWorldCenter(selection)
+            selection.view:addExplosion(x, y)
+        end
+        removed = selection.document:removeEditorObject(selection) or removed
+    end
+    if removed then
+        self:markHistoryChanged()
+        self:commitHistoryTransaction()
+        self:selectMapObjects({})
+    else
+        self:cancelHistoryTransaction()
+    end
+    return removed
+end
+
+function Editor:duplicateSelectedMapObject()
+    local selected = self:getSelectedMapObjects()
+    local owners = {}
+    for _, selection in ipairs(selected) do table.insert(owners, selection.document) end
+    self:beginHistoryTransaction("Duplicate Objects", owners)
+    local duplicates = {}
+    for _, selection in ipairs(selected) do
+        local object, layer = selection.document:duplicateEditorObject(selection)
+        if object then
+            local duplicate = selection.document:getObjectSelection(selection.map_id, layer, object)
+            duplicate.view = selection.view
+            table.insert(duplicates, duplicate)
+        end
+    end
+    if #duplicates == 0 then self:cancelHistoryTransaction() return false end
+    self:markHistoryChanged()
+    self:commitHistoryTransaction()
+    self:selectMapObjects(duplicates, duplicates[1])
+    return true
+end
+
+function Editor:applyDrawFXToSelection(fx_id)
+    local selection = self.selected_map_object
+    if not selection then return false end
+    self:beginHistoryTransaction("Add DrawFX", selection.document)
+    if not selection.document:addObjectFX(selection, fx_id) then
+        self:cancelHistoryTransaction()
+        return false
+    end
+    self:markHistoryChanged()
+    self:commitHistoryTransaction()
+    self:setPropertiesTarget(self:getMapObjectPropertiesTarget(selection), self)
+    self:addWarning("DrawFX assignments are session-local until the editor format is implemented",
+        nil, "drawfx_editing")
+    return true
+end
+
+function Editor:getDrawFXMenuItems()
+    local items = {}
+    for _, definition in ipairs(Registry.getEditorDrawFXAll()) do
+        local fx_id = definition.id
+        table.insert(items, {
+            label = definition.name,
+            action = function() self:applyDrawFXToSelection(fx_id) end
+        })
+    end
+    return items
+end
+
+function Editor:openMapObjectContext(selection, x, y)
+    if not self:isMapObjectSelected(selection) then self:selectMapObject(selection) end
+    return self.dockspace:openContextMenu({
+        { label = "Properties", action = function()
+            self.dockspace:setPanelVisible(self.properties_panel, true, self.properties_panel.last_region or "right")
+            if self.properties_panel.stack then self.properties_panel.stack:setActivePanel(self.properties_panel) end
+        end },
+        { label = "Duplicate", action = function() self:duplicateSelectedMapObject() end },
+        { label = "Add DrawFX", children = self:getDrawFXMenuItems() },
+        { label = "Delete", action = function() self:deleteSelectedMapObject(false) end },
+        { label = "Explode", action = function() self:deleteSelectedMapObject(true) end }
+    }, x, y, selection.view)
+end
+
+function Editor:startObjectReferenceDrag(control)
+    if not self.selected_map_object then
+        self:addWarning("Select the source object before linking an object-reference property",
+            nil, "object_reference")
+        return false
+    end
+    self.object_reference_drag = { control = control, source = self.selected_map_object }
+    return true
+end
+
+function Editor:finishObjectReferenceDrag(x, y)
+    local drag = self.object_reference_drag
+    self.object_reference_drag = nil
+    if not drag then return nil end
+    local selection = self:getMapObjectAtScreen(x, y)
+    if not selection then
+        self:addWarning("Drop the reference link onto an event or shape", nil, "object_reference")
+        return nil
+    end
+    self:clearDiagnostics("object_reference")
+    return selection.document:createObjectReference(selection)
 end
 
 function Editor:recordGameError(phase, trace)
@@ -764,6 +1622,35 @@ function Editor:drawEditor(canvas)
     love.graphics.clear(0.055, 0.055, 0.065, 1)
     self.game_preview:setCanvas(canvas)
     self.dockspace:draw()
+    if self.drag_preview then
+        local x, y = love.mouse.getPosition()
+        local font = EditorFont.get(16)
+        love.graphics.setFont(font)
+        local preview = self.drag_preview
+        if preview.event then
+            love.graphics.push()
+            love.graphics.translate(x + 18, y + 28)
+            preview.event:draw(0.55)
+            preview.event:drawBounds(0.55)
+            love.graphics.pop()
+        end
+        local label = preview.label or tostring(preview.data or "")
+        local icon = preview.icon and Assets.getTexture(preview.icon)
+        local icon_width = icon and icon:getWidth() + 6 or 0
+        local width = font:getWidth(label) + icon_width + 16
+        Draw.setColor(0.10, 0.16, 0.24, 0.68)
+        love.graphics.rectangle("fill", x + 14, y + 14, width, 28)
+        Draw.setColor(0.45, 0.72, 1, 0.72)
+        love.graphics.rectangle("line", x + 14.5, y + 14.5, width - 1, 27)
+        local text_x = x + 22
+        if icon then
+            Draw.setColor(1, 1, 1, 0.58)
+            Draw.draw(icon, text_x, y + 14 + math.floor((28 - icon:getHeight()) / 2))
+            text_x = text_x + icon_width
+        end
+        Draw.setColor(0.92, 0.92, 0.95, 0.72)
+        love.graphics.print(label, text_x, y + 19)
+    end
     self.message_bar:draw()
     self.menu_bar:draw()
     local mouse_x, mouse_y = love.mouse.getPosition()
@@ -772,7 +1659,7 @@ end
 
 function Editor:getCursorType(x, y)
     if self.entry_transition or self.exit_transition then return "cannot" end
-    if self.message_bar:containsPoint(x, y) then return "default" end
+    if self.message_bar:containsPoint(x, y) then return "select" end
     local menu_cursor = self.menu_bar:getCursorType(x, y)
     if menu_cursor ~= "default" then return menu_cursor end
     return self.dockspace:getCursorType(x, y)
@@ -1006,7 +1893,9 @@ function Editor:openMap(id)
     if not hasMap(id) then return false end
     if self.active_document then
         self.active_document:setPrimaryMap(id)
-        if self.active_document.panel then self.active_document.panel.title = id end
+        if self.active_document.panel then
+            self.active_document.panel.title = id .. (self.active_document:isDirty() and " *" or "")
+        end
         return self:activateMapDocument(self.active_document)
     end
     return false
@@ -1126,7 +2015,15 @@ function Editor:removeMapDocument(document)
         if candidate == document then remove_index = index break end
     end
     if not remove_index then return false end
+    if document:isDirty() and not document.discard_close_confirmed then
+        document.discard_close_confirmed = true
+        self:addWarning("Closing this map tab would discard unsaved changes",
+            "Map saving is unavailable until the editor format is implemented. Close the tab again to discard its current working changes.",
+            "unsaved_close:" .. document.panel.id)
+        return false
+    end
     if self.live_document == document then self:detachGamePreview() end
+    if self.history then self.history:forgetOwner(document) end
     self.dockspace:unregisterPanel(document.panel)
     table.remove(self.map_documents, remove_index)
     if self.active_document == document then
@@ -1140,6 +2037,7 @@ function Editor:removeMapDocument(document)
             self.dockspace:setFocus(nil)
         end
     end
+    self:onHistoryChanged({}, false)
     return true
 end
 
@@ -1399,7 +2297,24 @@ end
 
 function Editor:onKeyPressed(key, is_repeat)
     if self.entry_transition or self.exit_transition then return true end
+    if self.settings_browser and self.settings_browser:isCapturingKeybind() then
+        return self.dockspace:onKeyPressed(key, is_repeat) ~= false
+    end
     if self.menu_bar:onKeyPressed(key) then return true end
+    if Input.ctrl() and not is_repeat
+        and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
+        if key == "z" then return Input.shift() and self:redo() or self:undo() end
+        if key == "y" then return self:redo() end
+    end
+    if key == "escape" and (self.asset_drag or self.object_reference_drag or self.drag_preview) then
+        self.asset_drag, self.object_reference_drag, self.drag_preview = nil, nil, nil
+        return true
+    end
+    if key == "escape" and self.placement_event_id
+        and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
+        self.placement_event_id = nil
+        return true
+    end
     if key == "space" and not is_repeat and self.live_document
         and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
         self.consumed_editor_keys[key] = true
@@ -1430,6 +2345,13 @@ end
 
 function Editor:beginExitTransition()
     if self.entry_transition or self.exit_transition then return false end
+    if self:hasUnsavedChanges() and not self.discard_changes_confirmed then
+        self.discard_changes_confirmed = true
+        self:addWarning("Unsaved editor changes have not been written",
+            "Map saving is unavailable until the editor format is implemented. Trigger exit again to discard the current working changes.",
+            "unsaved_exit")
+        return false
+    end
     self:saveSession()
     self.session_saved_for_exit = true
     if self.live_document then
@@ -1487,7 +2409,10 @@ end
 
 function Editor:onMousePressed(x, y, button, istouch, presses)
     if self.entry_transition or self.exit_transition then return true end
-    if self.message_bar:containsPoint(x, y) then return true end
+    if self.message_bar:containsPoint(x, y) then
+        if button == 1 then self:toggleDiagnosticsPanel() end
+        return true
+    end
     if self.menu_bar:onMousePressed(x, y, button) then return true end
     if self.dockspace:onMousePressed(x, y, button, presses) then return true end
     if self:handleGameObjectSelectionMousePressed(x, y, button, istouch, presses) then return true end

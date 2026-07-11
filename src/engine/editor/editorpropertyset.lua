@@ -20,6 +20,8 @@ end
 function EditorPropertySet:inferType(value)
     if type(value) == "boolean" then return "boolean" end
     if type(value) == "number" then return "number" end
+    if type(value) == "function" then return "function" end
+    if type(value) == "table" then return "table" end
     return "string"
 end
 

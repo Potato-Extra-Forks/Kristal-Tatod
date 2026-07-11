@@ -13,6 +13,7 @@ function EditorButton:init(label, on_pressed)
 end
 
 function EditorButton:activate()
+    if not self.enabled then return false end
     if self.on_pressed then self.on_pressed(self) end
     return true
 end
@@ -41,7 +42,9 @@ end
 function EditorButton:drawSelf()
     local font = EditorFont.get(16)
     love.graphics.setFont(font)
-    if self.pressed then
+    if not self.enabled then
+        Draw.setColor(0.11, 0.11, 0.13, 1)
+    elseif self.pressed then
         Draw.setColor(0.18, 0.28, 0.42, 1)
     elseif self.focused then
         Draw.setColor(0.20, 0.30, 0.46, 1)
@@ -52,7 +55,7 @@ function EditorButton:drawSelf()
     Draw.setColor(self.focused and 0.55 or 0.32, self.focused and 0.68 or 0.32,
         self.focused and 0.90 or 0.37, 1)
     love.graphics.rectangle("line", 0.5, 0.5, self.width - 1, self.height - 1)
-    Draw.setColor(0.90, 0.90, 0.92, 1)
+    Draw.setColor(self.enabled and { 0.90, 0.90, 0.92, 1 } or { 0.42, 0.42, 0.45, 1 })
     love.graphics.print(self.label, math.floor((self.width - font:getWidth(self.label)) / 2),
         math.floor((self.height - font:getHeight()) / 2))
 end

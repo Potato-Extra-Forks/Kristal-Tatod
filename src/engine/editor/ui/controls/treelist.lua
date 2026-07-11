@@ -38,6 +38,7 @@ function EditorTreeList:init(options)
     self.on_rename = options.on_rename
     self.on_drag_outside = options.on_drag_outside
     self.on_drag_move = options.on_drag_move
+    self.on_drag_start = options.on_drag_start
     self.on_drag_end = options.on_drag_end
     self.on_context_menu = options.on_context_menu
     self.on_request_focus = options.on_request_focus
@@ -388,6 +389,7 @@ function EditorTreeList:onMouseMoved(x, y, dx, dy)
     if self.pending_drag and not self.dragging_node
         and math.abs(x - self.pending_drag.x) + math.abs(y - self.pending_drag.y) >= 5 then
         self.dragging_node = self.pending_drag.node
+        if self.on_drag_start then self.on_drag_start(self.dragging_node, self) end
     end
     if self.dragging_node then
         local _, _, target = self:getDropPlacement(x, y, self.dragging_node)

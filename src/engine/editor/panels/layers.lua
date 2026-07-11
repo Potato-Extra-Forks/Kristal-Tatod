@@ -30,12 +30,31 @@ function EditorLayersPanel:init(editor)
     self.updating_fields = false
     self.detail_y = 0
 
+    self.darken_toggle = self:addChild(EditorCheckbox("Darken Unselected",
+        editor.darken_unselected_layers ~= false, function(value)
+            if editor.settings and editor.settings:getSetting("appearance.darken_unselected") then
+                editor.settings:setValue("appearance.darken_unselected", value)
+            else
+                editor.darken_unselected_layers = value
+            end
+        end))
     self.new_button = self:addChild(EditorButton("New Layer", function() self:openNewLayerMenu() end))
     self.list = self:addChild(EditorItemList({
         row_height = 28,
         on_select = function(item) self:selectLayer(item and item.data) end,
         on_rename = function(item, _, new_name) self:renameLayer(item.data, new_name) end,
-        on_drag_end = function(item, list, x, y) self:finishLayerDrag(item, list, y) end,
+        on_drag_start = function(item)
+            local layer_type = self:getLayerType(item.data)
+            self.editor:beginDragPreview("layer", item.label, layer_type and layer_type.icon, item.data)
+        end,
+        on_drag_move = function(_, list, x, y)
+            local gx, gy = list:getGlobalPosition()
+            self.editor:updateDragPreview(gx + x, gy + y)
+        end,
+        on_drag_end = function(item, list, x, y)
+            self.editor:finishDragPreview()
+            self:finishLayerDrag(item, list, y)
+        end,
         on_context_menu = function(item, list, x, y) self:openLayerContextMenu(item, list, x, y) end,
         on_request_focus = function(control) self.editor.dockspace:setFocus(control) end
     }))
@@ -155,6 +174,7 @@ function EditorLayersPanel:getPropertiesTarget(layer)
     local layer_type = self:getLayerType(layer)
     return {
         title = (layer.name or "Unnamed Layer") .. " (" .. (layer_type and layer_type.name or "Unknown") .. ")",
+        history_owner = self.document,
         properties = layer.properties,
         property_types = layer._editor_property_types,
         property_set = layer._editor_property_set,
@@ -180,7 +200,10 @@ end
 
 function EditorLayersPanel:toggleLayerVisibility(layer)
     if not self.document or not layer then return false end
+    self.editor:beginHistoryTransaction("Toggle Layer Visibility", self.document)
     self.document:setEditableLayerVisible(layer._editor_uid, layer._editor_visible == false)
+    self.editor:markHistoryChanged()
+    self.editor:commitHistoryTransaction()
     self:refreshList(self.selected_layer and self.selected_layer._editor_uid)
     self:warnVisualOnly()
     return true
@@ -195,11 +218,14 @@ end
 
 function EditorLayersPanel:renameLayer(layer, value)
     if not layer or value == "" then return false end
+    self.editor:beginHistoryTransaction("Rename Layer", self.document)
     layer.name = value
     if self.selected_layer == layer then
         self.editor:setPropertiesTarget(self:getPropertiesTarget(layer), self)
     end
     self:changed(false)
+    self.editor:markHistoryChanged()
+    self.editor:commitHistoryTransaction()
     return true
 end
 
@@ -234,8 +260,11 @@ end
 
 function EditorLayersPanel:createLayer(type_id)
     if not self.document then return false end
+    self.editor:beginHistoryTransaction("Create Layer", self.document)
     local layer = self.document:createEditableLayer(type_id)
-    if not layer then return false end
+    if not layer then self.editor:cancelHistoryTransaction() return false end
+    self.editor:markHistoryChanged()
+    self.editor:commitHistoryTransaction()
     self:refreshList(layer._editor_uid)
     self:warnVisualOnly()
     return true
@@ -248,7 +277,10 @@ function EditorLayersPanel:deleteLayer()
     for candidate_index, layer in ipairs(layers) do
         if layer == self.selected_layer then index = candidate_index break end
     end
+    self.editor:beginHistoryTransaction("Delete Layer", self.document)
     self.document:removeEditableLayer(self.selected_layer._editor_uid)
+    self.editor:markHistoryChanged()
+    self.editor:commitHistoryTransaction()
     self.selected_layer = nil
     local next_layer = #layers > 0 and layers[MathUtils.clamp(index, 1, #layers)] or nil
     self:refreshList(next_layer and next_layer._editor_uid)
@@ -259,17 +291,23 @@ end
 function EditorLayersPanel:finishLayerDrag(item, list, y)
     if not self.document or not item then return end
     local target = MathUtils.clamp(list:getItemIndexAt(y), 1, #self:getLayers())
+    self.editor:beginHistoryTransaction("Reorder Layer", self.document)
     if self.document:moveEditableLayer(item.id, target) then
+        self.editor:markHistoryChanged()
+        self.editor:commitHistoryTransaction()
         self:refreshList(item.id)
         self:warnVisualOnly()
+    else
+        self.editor:cancelHistoryTransaction()
     end
 end
 
 function EditorLayersPanel:update(dt)
     local padding = 8
-    self.new_button:setBounds(padding, padding, math.max(0, self.width - padding * 2), 28)
-    local list_height = math.max(0, self.height - 52)
-    self.list:setBounds(padding, 44, math.max(0, self.width - padding * 2), list_height)
+    self.darken_toggle:setBounds(padding, 6, math.max(0, self.width - padding * 2), 28)
+    self.new_button:setBounds(padding, 38, math.max(0, self.width - padding * 2), 28)
+    local list_height = math.max(0, self.height - 82)
+    self.list:setBounds(padding, 74, math.max(0, self.width - padding * 2), list_height)
     super.update(self, dt)
 end
 

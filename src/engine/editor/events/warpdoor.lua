@@ -1,5 +1,10 @@
 local EditorWarpDoor, super = Class(EditorEvent)
 
+function EditorWarpDoor:getEditorSprite(data)
+    return data.properties.open == false and "world/events/shortcut_door_off"
+        or "world/events/shortcut_door"
+end
+
 function EditorWarpDoor:init(data, options)
     super.init(self, data, options)
     self:registerProperty("open", "boolean", { default = true })

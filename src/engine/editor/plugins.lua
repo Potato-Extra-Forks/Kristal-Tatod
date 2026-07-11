@@ -76,6 +76,34 @@ function PluginMethods:getControl(id)
     return self.controls[id]
 end
 
+function PluginMethods:registerSettingsPage(id, title, options)
+    assert(type(id) == "string" and id ~= "", "Plugin settings pages require an id")
+    assert(not self.settings_pages[id], "Duplicate plugin settings page id: " .. id)
+    local page_id = namespaced(self, "settings_page", id)
+    options = TableUtils.copy(options or {}, true)
+    options.owner = self
+    local page = EditorPlugins.editor.settings:registerPage(page_id, title or id, options)
+    self.settings_pages[id] = page
+    return page
+end
+
+function PluginMethods:registerSetting(page, id, definition)
+    if type(id) == "table" and definition == nil then
+        definition, id, page = id, page, nil
+    end
+    assert(type(id) == "string" and id ~= "", "Plugin settings require an id")
+    if page == nil then
+        page = self.settings_pages.default or self:registerSettingsPage("default", self.info.name or self.id)
+    elseif type(page) == "string" then
+        page = self.settings_pages[page] or self:registerSettingsPage(page, page)
+    end
+    assert(type(page) == "table" and page.id, "Plugin settings require a settings page")
+    local setting_id = namespaced(self, "setting", id)
+    definition = TableUtils.copy(definition or {}, true)
+    definition.owner = self
+    return EditorPlugins.editor.settings:registerSetting(page.id, setting_id, definition)
+end
+
 function PluginMethods:registerPropertyType(id, definition)
     local type_id = namespaced(self, "property_type", id)
     Registry.registerEditorPropertyType(type_id, definition)
@@ -99,6 +127,10 @@ function PluginMethods:registerEditorEvent(id, event)
     if type(event) == "string" then event = self:require(event) end
     Registry.registerEditorEvent(id, event)
     return event
+end
+
+function PluginMethods:registerEditorDrawFX(id, definition)
+    return Registry.registerEditorDrawFX(namespaced(self, "draw_fx", id), definition)
 end
 
 function PluginMethods:registerPanel(id, title, content_factory, options)
@@ -213,6 +245,7 @@ function EditorPlugins:loadPlugin(editor, directory, folder, source)
 
     local plugin = setmetatable({
         id = info.id, info = info, controls = {}, panels = {},
+        settings_pages = {},
         loaded_scripts = {}, loading_scripts = {}, __editor_plugin = true
     }, { __index = PluginMethods })
     self.plugins[plugin.id] = plugin
@@ -222,6 +255,7 @@ function EditorPlugins:loadPlugin(editor, directory, folder, source)
         local loaded, result = xpcall(function() return plugin:require("plugin") end, tracebackError)
         if not loaded then
             self:clearPluginHooks(plugin)
+            editor.settings:removeOwner(plugin)
             self.plugins[plugin.id] = nil
             TableUtils.removeValue(self.plugin_order, plugin)
             self:report(editor, "Could not initialize editor plugin script: " .. plugin.id, result)
@@ -275,6 +309,8 @@ function EditorPlugins:initialize(editor)
                 end
                 plugin.controls = {}
                 plugin.panels = {}
+                editor.settings:removeOwner(plugin)
+                plugin.settings_pages = {}
                 self:report(editor, "Editor plugin init failed: " .. plugin.id, message)
             end
         end

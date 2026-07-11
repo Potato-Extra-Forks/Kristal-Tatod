@@ -1,4 +1,5 @@
 local EditorCyberTrashCan, super = Class(EditorEvent)
+EditorCyberTrashCan.editor_sprite = "world/events/cyber_trash"
 function EditorCyberTrashCan:init(data, options)
     super.init(self, data, options)
     self:registerProperty("item", "string")

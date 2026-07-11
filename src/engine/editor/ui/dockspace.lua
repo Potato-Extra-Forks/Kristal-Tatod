@@ -562,7 +562,7 @@ function EditorDockSpace:openContextMenu(items, x, y, owner)
     if not items or #items == 0 then return false end
     local font = EditorFont.get(16)
     local width = 140
-    for _, item in ipairs(items) do width = math.max(width, font:getWidth(item.label) + 24) end
+    for _, item in ipairs(items) do width = math.max(width, font:getWidth(item.label) + (item.checked and 38 or 24)) end
     local height = #items * 28
     local menu_x = MathUtils.clamp(x, self.x, math.max(self.x, self.x + self.width - width))
     local menu_y = MathUtils.clamp(y, self.y, math.max(self.y, self.y + self.height - height))
@@ -583,7 +583,9 @@ function EditorDockSpace:openContextSubmenu(menu, item)
     if menu.submenu == item then return end
     local font = EditorFont.get(16)
     local width = 120
-    for _, child in ipairs(item.children) do width = math.max(width, font:getWidth(child.label) + 24) end
+    for _, child in ipairs(item.children) do
+        width = math.max(width, font:getWidth(child.label) + (child.checked and 38 or 24))
+    end
     local height = #item.children * 28
     local x = menu.rect.x + menu.rect.width
     if x + width > self.x + self.width then x = menu.rect.x - width end
@@ -652,7 +654,9 @@ function EditorDockSpace:drawContextMenu()
             and self.theme.tab_active or self.theme.tab_inactive)
         love.graphics.rectangle("fill", rect.x, rect.y, rect.width, rect.height)
         love.graphics.setColor(self.theme.text)
-        love.graphics.print(item.label, rect.x + 12,
+        if item.checked then love.graphics.print("*", rect.x + 8,
+            rect.y + math.floor((rect.height - font:getHeight()) / 2)) end
+        love.graphics.print(item.label, rect.x + (item.checked and 24 or 12),
             rect.y + math.floor((rect.height - font:getHeight()) / 2))
         if item.children then
             love.graphics.print(">", rect.x + rect.width - font:getWidth(">") - 10,
@@ -669,7 +673,9 @@ function EditorDockSpace:drawContextMenu()
                 and self.theme.tab_active or self.theme.tab_inactive)
             love.graphics.rectangle("fill", item_rect.x, item_rect.y, item_rect.width, item_rect.height)
             love.graphics.setColor(self.theme.text)
-            love.graphics.print(item.label, item_rect.x + 12,
+            if item.checked then love.graphics.print("*", item_rect.x + 8,
+                item_rect.y + math.floor((item_rect.height - font:getHeight()) / 2)) end
+            love.graphics.print(item.label, item_rect.x + (item.checked and 24 or 12),
                 item_rect.y + math.floor((item_rect.height - font:getHeight()) / 2))
         end
         local submenu_rect = menu.submenu_rect

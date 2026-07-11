@@ -8,6 +8,8 @@ TiledTilesetReader.operations = operations
 function TiledTilesetReader:initialize(data, path, base_dir)
     local tileset = self.tileset
 
+    tileset.data = data
+
     tileset.path = path
     tileset.base_dir = base_dir or FileSystemUtils.getDirname(tileset.path)
 
@@ -28,6 +30,11 @@ function TiledTilesetReader:initialize(data, path, base_dir)
     tileset.tile_info = {}
     for _, tile in ipairs(data.tiles or {}) do
         local info = {}
+        info.properties = tile.properties or {}
+        info.probability = tile.probability
+        info.class = tile.class or tile.type
+        info.objectgroup = tile.objectgroup
+        info.terrain = tile.terrain
         if tile.animation then
             info.animation = { duration = 0, frames = {} }
             for _, anim in ipairs(tile.animation) do
