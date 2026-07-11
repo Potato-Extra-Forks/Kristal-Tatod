@@ -2,12 +2,29 @@
 ---@overload fun(data?: table, options?: table): EditorEvent
 local EditorEvent = Class()
 
+function EditorEvent:registerProperty(id, property_type, options)
+    return self.property_set:registerProperty(id, property_type, options)
+end
+
+function EditorEvent:registerPropertyGroup(id, options)
+    return self.property_set:registerGroup(id, options)
+end
+
 --- Editor events are deliberately plain classes. They are rendered directly
 --- by map previews and never receive a parent, stage, World, or Game instance.
 function EditorEvent:init(data, options)
     data = data or {}
     options = options or {}
     self.data = data
+    data.properties = data.properties or {}
+    data.__editor_property_types = data.__editor_property_types or {}
+    self.properties = data.properties
+    self.property_types = data.__editor_property_types
+    self.property_set = EditorPropertySet(data.properties, data.__editor_property_types)
+    self:registerProperty("uid", "string", { name = "Unique ID" })
+    self:registerProperty("cond", "string", { name = "Load Condition" })
+    self:registerProperty("flagcheck", "string", { name = "Load Flag" })
+    self:registerProperty("flagvalue", "value", { name = "Load Flag Value" })
     self.id = options.event_id
     self.layer = options.depth or 0
     self.layer_uid = options.layer_uid
@@ -19,17 +36,18 @@ function EditorEvent:init(data, options)
     self.height = data.height or 0
     self.rotation = math.rad(data.rotation or 0)
     self.visible = data.visible ~= false
-    self.sprite = self:getPreviewSprite(options.event_class, options.sprite)
+    self.sprite = self:getPreviewSprite(options.sprite)
 end
 
-function EditorEvent:getPreviewSprite(event_class, sprite)
+function EditorEvent:getPreviewSprite(sprite)
     local properties = self.data.properties or {}
-    sprite = sprite or self.data.editor_sprite or properties.editor_sprite
-    if not sprite and event_class and event_class.getEditorSprite then
-        local success, result = pcall(event_class.getEditorSprite, event_class, self.data)
+    sprite = sprite or self.editor_sprite
+    if not sprite and self.sprite_property then sprite = properties[self.sprite_property] end
+    if not sprite and self.getEditorSprite then
+        local success, result = pcall(self.getEditorSprite, self, self.data)
         if success then sprite = result end
     end
-    return sprite or (event_class and event_class.editor_sprite) or properties.sprite
+    return sprite
 end
 
 function EditorEvent:getTexture()

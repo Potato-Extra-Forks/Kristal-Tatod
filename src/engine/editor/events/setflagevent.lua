@@ -1,0 +1,9 @@
+local EditorSetFlagEvent, super = Class(EditorEvent)
+function EditorSetFlagEvent:init(data, options)
+    super.init(self, data, options)
+    self:registerProperty("flag", "string")
+    self:registerProperty("value", "value")
+    self:registerProperty("once", "boolean")
+    self:registerProperty("mapflag", "boolean", { name = "Map Flag" })
+end
+return EditorSetFlagEvent

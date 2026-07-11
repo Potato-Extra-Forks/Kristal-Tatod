@@ -7,6 +7,7 @@ local EditorPlugins = {
     controls = {},
     panel_definitions = {},
     menu_definitions = {},
+    event_initializers = {},
     editor = nil
 }
 
@@ -40,12 +41,24 @@ function PluginMethods:require(path, ...)
     local previous_plugin = rawget(_G, "Plugin")
     _G.Plugin = self
     local arguments = { ... }
-    local success, result = xpcall(function() return chunk(unpack(arguments)) end, tracebackError)
+    local success, result
+    HookSystem.withOwner(self, function()
+        success, result = xpcall(function() return chunk(unpack(arguments)) end, tracebackError)
+    end)
     _G.Plugin = previous_plugin
     self.loading_scripts[path] = nil
     if not success then error(result, 2) end
     self.loaded_scripts[path] = result == nil and NIL_RESULT or result
     return result
+end
+
+function PluginMethods:loadHooks()
+    local paths = {}
+    for path in pairs(self.info.script_chunks) do
+        if StringUtils.startsWith(path, "scripts/hooks/") then table.insert(paths, path) end
+    end
+    table.sort(paths)
+    for _, path in ipairs(paths) do self:require(path) end
 end
 
 function PluginMethods:registerControl(id, control)
@@ -61,6 +74,31 @@ end
 
 function PluginMethods:getControl(id)
     return self.controls[id]
+end
+
+function PluginMethods:registerPropertyType(id, definition)
+    local type_id = namespaced(self, "property_type", id)
+    Registry.registerEditorPropertyType(type_id, definition)
+    return type_id
+end
+
+function PluginMethods:registerEditorEventProperty(event_id, id, property_type, options)
+    return self:registerEditorEventInitializer(event_id, function(event)
+        event:registerProperty(id, property_type, options)
+    end)
+end
+
+function PluginMethods:registerEditorEventInitializer(event_id, initializer)
+    assert(type(initializer) == "function", "EditorEvent initializers must be functions")
+    EditorPlugins.event_initializers[event_id] = EditorPlugins.event_initializers[event_id] or {}
+    table.insert(EditorPlugins.event_initializers[event_id], initializer)
+    return initializer
+end
+
+function PluginMethods:registerEditorEvent(id, event)
+    if type(event) == "string" then event = self:require(event) end
+    Registry.registerEditorEvent(id, event)
+    return event
 end
 
 function PluginMethods:registerPanel(id, title, content_factory, options)
@@ -121,6 +159,17 @@ function EditorPlugins:reset()
     self.controls = {}
     self.panel_definitions = {}
     self.menu_definitions = {}
+    self.event_initializers = {}
+end
+
+function EditorPlugins:initializeEditorEvent(event)
+    for _, initializer in ipairs(self.event_initializers[event.id] or {}) do initializer(event) end
+end
+
+function EditorPlugins:clearPluginHooks(plugin)
+    HookSystem.clearOwnedHooks(function(owner)
+        return owner == plugin or plugin == nil and owner.__editor_plugin == true
+    end)
 end
 
 function EditorPlugins:report(editor, message, detail)
@@ -164,7 +213,7 @@ function EditorPlugins:loadPlugin(editor, directory, folder, source)
 
     local plugin = setmetatable({
         id = info.id, info = info, controls = {}, panels = {},
-        loaded_scripts = {}, loading_scripts = {}
+        loaded_scripts = {}, loading_scripts = {}, __editor_plugin = true
     }, { __index = PluginMethods })
     self.plugins[plugin.id] = plugin
     table.insert(self.plugin_order, plugin)
@@ -172,6 +221,7 @@ function EditorPlugins:loadPlugin(editor, directory, folder, source)
     if info.script_chunks.plugin then
         local loaded, result = xpcall(function() return plugin:require("plugin") end, tracebackError)
         if not loaded then
+            self:clearPluginHooks(plugin)
             self.plugins[plugin.id] = nil
             TableUtils.removeValue(self.plugin_order, plugin)
             self:report(editor, "Could not initialize editor plugin script: " .. plugin.id, result)
@@ -195,6 +245,7 @@ function EditorPlugins:scanDirectory(editor, directory, source)
 end
 
 function EditorPlugins:initialize(editor)
+    self:clearPluginHooks()
     self:reset()
     self.editor = editor
     love.filesystem.createDirectory(self.directory)
@@ -202,12 +253,21 @@ function EditorPlugins:initialize(editor)
     self:scanDirectory(editor, self.directory, "user")
 
     for _, plugin in ipairs(self.plugin_order) do
+        local hooks_loaded, hooks_message = xpcall(function() plugin:loadHooks() end, tracebackError)
+        if not hooks_loaded then
+            plugin.disabled = true
+            self:clearPluginHooks(plugin)
+            self:report(editor, "Editor plugin hooks failed: " .. plugin.id, hooks_message)
+        end
         local init = plugin.init or plugin.onInit
-        if init then
+        if init and not plugin.disabled then
             local panel_count = #self.panel_definitions
             local menu_count = #self.menu_definitions
-            local success, message = xpcall(function() init(plugin, editor) end, tracebackError)
+            local success, message = xpcall(function()
+                HookSystem.withOwner(plugin, function() init(plugin, editor) end)
+            end, tracebackError)
             if not success then
+                self:clearPluginHooks(plugin)
                 while #self.panel_definitions > panel_count do table.remove(self.panel_definitions) end
                 while #self.menu_definitions > menu_count do table.remove(self.menu_definitions) end
                 for id in pairs(plugin.controls) do
@@ -275,6 +335,7 @@ function EditorPlugins:getPlugins()
 end
 
 function EditorPlugins:shutdown(editor)
+    self:clearPluginHooks()
     if self.editor == editor then self.editor = nil end
 end
 

@@ -37,6 +37,24 @@ local function flattenLayers(layers, result, parent)
     return result
 end
 
+local function setupLayerProperties(layer)
+    layer.properties = layer.properties or {}
+    layer._editor_property_types = layer._editor_property_types or {}
+    local properties = EditorPropertySet(layer.properties, layer._editor_property_types)
+    properties:registerProperty("thin", "boolean")
+    if layer._editor_type_id == "objects" then properties:registerProperty("spawn", "boolean") end
+    if layer._editor_type_id == "image" then
+        properties:registerProperty("speedx", "number", { name = "Speed X" })
+        properties:registerProperty("speedy", "number", { name = "Speed Y" })
+        properties:registerProperty("wrapx", "boolean", { name = "Wrap X" })
+        properties:registerProperty("wrapy", "boolean", { name = "Wrap Y" })
+        properties:registerProperty("fitscreen", "boolean", { name = "Fit Screen" })
+        properties:registerProperty("scalex", "number", { name = "Scale X", default = 1 })
+        properties:registerProperty("scaley", "number", { name = "Scale Y", default = 1 })
+    end
+    layer._editor_property_set = properties
+end
+
 function EditorMapDocument:init(editor, map_id)
     self.editor = editor
     self.primary_map_id = nil
@@ -64,6 +82,7 @@ function EditorMapDocument:getEditableLayers(id)
                 or Registry.getLayerType(layer._editor_type_id or "default")
             layer._editor_type_id = layer_type and layer_type.id or "default"
             layer._editor_visible = layer.visible ~= false
+            setupLayerProperties(layer)
         end
         self.editable_layers[id] = layers
     end
@@ -129,6 +148,7 @@ function EditorMapDocument:createEditableLayer(type_id, id)
         parallaxx = 1,
         parallaxy = 1,
         properties = {},
+        _editor_property_types = {},
         color = TableUtils.copy(layer_type and layer_type.color or { 0.8, 0.8, 0.82, 1 }, true)
     }
     self.next_layer_uid = self.next_layer_uid + 1
@@ -140,6 +160,7 @@ function EditorMapDocument:createEditableLayer(type_id, id)
         layer.objects = {}
     end
     table.insert(layers, layer)
+    setupLayerProperties(layer)
     self:invalidatePreview(id)
     return layer
 end

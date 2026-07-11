@@ -40,7 +40,22 @@ function EditorMapBrowser:selectNode(node)
         return
     end
     node.editor_properties = node.editor_properties or {}
+    node.editor_property_types = node.editor_property_types or {}
     local data = node.registry_id and Registry.getMapData(node.registry_id)
+    if data then
+        data.properties = data.properties or {}
+        data.__editor_property_types = data.__editor_property_types or {}
+    end
+    local property_values = data and data.properties or node.editor_properties
+    local property_types = data and data.__editor_property_types or node.editor_property_types
+    local property_set = EditorPropertySet(property_values, property_types)
+    if node.type == "map" then
+        property_set:registerProperty("name", "string")
+        property_set:registerProperty("music", "string")
+        property_set:registerProperty("keepmusic", "boolean", { name = "Keep Music" })
+        property_set:registerProperty("light", "boolean")
+        property_set:registerProperty("border", "string")
+    end
     local reader_class = node.registry_id and Registry.getMapReader(node.registry_id)
     local fields = {
         {
@@ -68,6 +83,8 @@ function EditorMapBrowser:selectNode(node)
         title = node.type == "folder" and "Folder" or "Map",
         fields = fields,
         properties = data and data.properties or node.editor_properties,
+        property_types = data and data.__editor_property_types or node.editor_property_types,
+        property_set = property_set,
         on_changed = function()
             self.editor:addWarning("Map and folder property changes are visual-only until file editing is implemented",
                 nil, "map_tree")

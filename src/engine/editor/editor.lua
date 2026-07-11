@@ -2,6 +2,9 @@ local EDITOR_DEFAULT_WIDTH = 1280
 local EDITOR_DEFAULT_HEIGHT = 800
 local EDITOR_SESSION_VERSION = 1
 local EDITOR_SESSION_DIRECTORY = "editor"
+local EDITOR_MUSIC = "edit"
+local EDITOR_MUSIC_VOLUME = 0.5
+local EDITOR_MUSIC_FADE_TIME = 1
 
 local function copyTable(source)
     local result = setmetatable({}, getmetatable(source))
@@ -38,7 +41,52 @@ local function safeProjectId(id)
     return tostring(id or "unknown"):gsub("[^%w%._%-]", "_")
 end
 
-function Editor:init() end
+function Editor:init()
+    self.music = Music()
+end
+
+function Editor:resetEditingMusic()
+    if self.music then self.music:remove() end
+    self.music = Music()
+    self.editing_music_started = false
+end
+
+function Editor:resumeEditingMusic()
+    if not self.editing_music_started then
+        self.music:play(EDITOR_MUSIC, 0)
+        if not self.music.source then return false end
+        self.music:fade(EDITOR_MUSIC_VOLUME, EDITOR_MUSIC_FADE_TIME)
+        self.editing_music_started = true
+    elseif self.music:canResume() then
+        self.music:resume()
+    end
+    return true
+end
+
+function Editor:pauseEditingMusic()
+    if self.music:isPlaying() then self.music:pause() end
+end
+
+function Editor:stopEditingMusic()
+    self.music:stop()
+    self.editing_music_started = false
+end
+
+function Editor:syncEditingMusic()
+    if self.editor_music_enabled == false then
+        self:pauseEditingMusic()
+        return
+    end
+    local preview_running = self.live_document ~= nil
+        and not self.game_preview_paused
+        and not self.game_faulted
+        and not self.exit_transition
+    if preview_running then
+        self:pauseEditingMusic()
+    else
+        self:resumeEditingMusic()
+    end
+end
 
 function Editor:getSessionPath()
     return EDITOR_SESSION_DIRECTORY .. "/" .. safeProjectId(self.project_id) .. ".json"
@@ -144,7 +192,8 @@ function Editor:captureSession()
         active_panel_id = self.active_document and self.active_document.panel.id,
         preferences = {
             custom_cursors = self.use_custom_cursors,
-            deltarune_font = self.use_deltarune_font
+            deltarune_font = self.use_deltarune_font,
+            editor_music = self.editor_music_enabled
         },
         documents = {},
         layout = self:captureLayout(),
@@ -242,6 +291,9 @@ function Editor:registerMenuBar()
     self.menu_bar:registerToggle("view", "deltarune_font", "Use Deltarune Font",
         function() return self.use_deltarune_font end,
         function(enabled) self:setDeltaruneFontEnabled(enabled) end)
+    self.menu_bar:registerToggle("view", "editor_music", "Editor Music",
+        function() return self.editor_music_enabled end,
+        function(enabled) self:setEditingMusicEnabled(enabled) end)
     self.menu_bar:registerToggle("view", "tile_grid", "Tile Grid (G)",
         function() return self.show_tile_grid end,
         function(enabled) self.show_tile_grid = enabled == true end)
@@ -397,6 +449,7 @@ end
 
 function Editor:enter(previous, options)
     options = options or {}
+    self:resetEditingMusic()
     self.source_state = options.source_state or previous
     self.entry_transition = options.entry_transition
     self.exit_transition = nil
@@ -422,6 +475,7 @@ function Editor:enter(previous, options)
     self.show_tile_grid = session and session.tile_grid == true or false
     self.use_custom_cursors = preferences.custom_cursors ~= false
     self.use_deltarune_font = preferences.deltarune_font ~= false
+    self.editor_music_enabled = preferences.editor_music ~= false
     self.previous_lock_movement = Game.lock_movement
     self.game_preview_movement_lock = self.previous_lock_movement
     self.game_preview_lock_before_pause = nil
@@ -448,9 +502,12 @@ function Editor:enter(previous, options)
     self:setupPanels(session)
     self:restoreEntryState(session, options, context_document, restored_by_panel,
         game_center_x, game_center_y)
+    self:syncEditingMusic()
 end
 
 function Editor:leave()
+    self:stopEditingMusic()
+    self.music:remove()
     self:clearGameObjectSelection()
     EditorPlugins:shutdown(self)
     if not self.session_saved_for_exit then self:saveSession() end
@@ -510,6 +567,8 @@ function Editor:leave()
     self.game_preview_snapshot_document = nil
     self.game_preview_snapshot_save_id = nil
     self.game_music_suspended_by_editor = nil
+    self.editing_music_started = nil
+    self.editor_music_enabled = nil
     self.game_preview_movement_lock = nil
     self.game_preview_lock_before_pause = nil
 end
@@ -533,6 +592,11 @@ end
 
 function Editor:setDeltaruneFontEnabled(enabled)
     self.use_deltarune_font = enabled ~= false
+end
+
+function Editor:setEditingMusicEnabled(enabled)
+    self.editor_music_enabled = enabled ~= false
+    self:syncEditingMusic()
 end
 
 function Editor:addDiagnostic(severity, message, detail, source)
@@ -559,6 +623,7 @@ function Editor:recordGameError(phase, trace)
     local summary = trace:match("([^\n]+)") or "Unknown game error"
     self:addError(string.format("Game preview %s failed; preview paused: %s", phase, summary), trace, "game")
     print(string.format("Editor caught a game preview %s error:\n%s", phase, trace))
+    self:syncEditingMusic()
 end
 
 function Editor:runGameCallback(phase, callback)
@@ -756,6 +821,7 @@ function Editor:detachGamePreview()
     self.game_panel = nil
     Game.lock_movement = true
     self.dockspace:layout()
+    self:syncEditingMusic()
     return true
 end
 
@@ -790,6 +856,7 @@ function Editor:setGamePreviewPaused(paused)
         self.game_preview_movement_lock = Game.lock_movement
         self.game_preview_lock_before_pause = nil
     end
+    self:syncEditingMusic()
     return true
 end
 
@@ -827,6 +894,7 @@ function Editor:setStandaloneGamePreviewMap(id)
     Game.lock_movement = was_paused and true or self.game_preview_movement_lock
     self.dockspace:layout()
     self.dockspace:setFocus(self.game_preview)
+    self:syncEditingMusic()
     return true
 end
 
@@ -1006,6 +1074,7 @@ function Editor:showGamePreview(options)
     self.dockspace:layout()
     if options.select_panel ~= false and panel.stack then panel.stack:setActivePanel(panel) end
     self.dockspace:setFocus(self.game_preview)
+    self:syncEditingMusic()
     return true
 end
 
@@ -1163,7 +1232,22 @@ function Editor:getGameObjectPropertiesTarget(object)
         data.properties = data.properties or {}
     else
         object.editor_properties = object.editor_properties or {}
+        object.editor_property_types = object.editor_property_types or {}
     end
+    if data then data.__editor_property_types = data.__editor_property_types or {} end
+    local event_id
+    if data then
+        event_id = data.type or data.class
+        if event_id == nil or event_id == "" then event_id = data.name end
+    end
+    local property_set
+    if event_id then
+        local success, editor_event = pcall(Registry.createEditorEvent, event_id, data, {})
+        if success and editor_event then property_set = editor_event.property_set end
+    end
+    property_set = property_set or EditorPropertySet(
+        data and data.properties or object.editor_properties,
+        data and data.__editor_property_types or object.editor_property_types)
     return {
         title = ClassUtils.getClassName(object) or "Game Object",
         fields = {
@@ -1174,6 +1258,8 @@ function Editor:getGameObjectPropertiesTarget(object)
             numberField("Layer", "layer")
         },
         properties = data and data.properties or object.editor_properties,
+        property_types = data and data.__editor_property_types or object.editor_property_types,
+        property_set = property_set,
         on_changed = function()
             self:addWarning("Game object property changes affect only the current preview",
                 nil, "object_property_preview")
@@ -1353,6 +1439,7 @@ function Editor:beginExitTransition()
             self.game_preview_movement_lock = Game.lock_movement
         end
     end
+    self:stopEditingMusic()
     self:suspendGamePreviewAudio()
     Game.lock_movement = true
     self.exit_transition = EditorModeTransition("exit", function(transition)

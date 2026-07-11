@@ -26,6 +26,7 @@
 ---@field event_scripts table<string, function|table<string, function>>
 ---@field layer_types LayerTypeRegistry
 ---@field editor_events table<string, EditorEvent>
+---@field editor_properties EditorPropertyRegistry
 ---@field tilesets table<string, Tileset>
 ---@field maps table<string, Map>
 ---@field map_data table<string, table> -- TODO: Document map data
@@ -98,6 +99,7 @@ function Registry.initialize(preload)
         Registry.initBullets()
         Registry.initCutscenes()
         Registry.initEventScripts()
+        Registry.initEditorProperties()
         Registry.initLayerTypes()
         Registry.initTilesets()
         Registry.initMaps()
@@ -459,6 +461,19 @@ function Registry.getLayerType(id)
     return self.layer_types and self.layer_types:get(id)
 end
 
+function Registry.getEditorPropertyType(id)
+    return self.editor_properties and self.editor_properties:getType(id)
+end
+
+function Registry.getEditorPropertyTypes()
+    return self.editor_properties and self.editor_properties:getTypes() or {}
+end
+
+function Registry.registerEditorPropertyType(id, definition)
+    assert(self.editor_properties, "Editor property registry is not initialized")
+    return self.editor_properties:registerType(id, definition)
+end
+
 function Registry.getLayerTypes()
     return self.layer_types and self.layer_types:getAll() or {}
 end
@@ -471,11 +486,9 @@ function Registry.createEditorEvent(id, data, options)
     local event_class = self.getEditorEvent(id) or EditorEvent
     options = options or {}
     options.event_id = id
-    options.event_class = options.event_class
-        or (Game.event_registry and Game.event_registry:getEditorSource(id))
-        or (self.events and self.events[id])
-        or (Game.builtin_event_registry and Game.builtin_event_registry:getEditorSource(id))
-    return event_class(data, options)
+    local event = event_class(data, options)
+    if EditorPlugins then EditorPlugins:initializeEditorEvent(event) end
+    return event
 end
 
 ---@param id string
@@ -663,6 +676,7 @@ end
 function Registry.registerEditorEvent(id, class)
     assert(type(id) == "string" and id ~= "", "Editor event requires a non-empty id")
     assert(isClass(class) and class:includes(EditorEvent), "Editor event must extend EditorEvent")
+    class.id = id
     self.editor_events[id] = class
 end
 
@@ -921,6 +935,11 @@ function Registry.initLayerTypes()
     Kristal.callEvent(KRISTAL_EVENT.onRegisterLayerTypes, self.layer_types)
 end
 
+function Registry.initEditorProperties()
+    self.editor_properties = EditorPropertyRegistry()
+    Kristal.callEvent(KRISTAL_EVENT.onRegisterEditorPropertyTypes, self.editor_properties)
+end
+
 function Registry.initTilesets()
     self.tilesets = {}
 
@@ -976,6 +995,21 @@ end
 
 function Registry.initEditorEvents()
     self.editor_events = {}
+
+    local builtins = {
+        savepoint = EditorSavepoint, interactable = EditorInteractable, script = EditorScriptEvent,
+        transition = EditorTransition, npc = EditorNPC, enemy = EditorChaserEnemy,
+        outline = EditorOutline, silhouette = EditorSilhouette, slidearea = EditorSlideArea,
+        mirror = EditorMirrorArea, chest = EditorTreasureChest, cameratarget = EditorCameraTarget,
+        hideparty = EditorHideParty, setflag = EditorSetFlagEvent, cybertrash = EditorCyberTrashCan,
+        forcefield = EditorForcefield, pushblock = EditorPushBlock, tilebutton = EditorTileButton,
+        magicglass = EditorMagicGlass, warpdoor = EditorWarpDoor, darkfountain = EditorDarkFountain,
+        fountainfloor = EditorFountainFloor, quicksave = EditorQuicksave, sprite = EditorSpriteEvent,
+        climbentry = EditorClimbEntry, climbexit = EditorClimbExit, climblanding = EditorClimbLanding,
+        climbarea = EditorClimbArea, fallingclimbarea = EditorFallingClimbArea,
+        climbunsafe = EditorClimbUnsafe, climbmover = EditorClimbMover
+    }
+    for id, event in pairs(builtins) do self.registerEditorEvent(id, event) end
 
     for _, path, event in self.iterScripts(Registry.paths["editor_events"], false, true) do
         assert(event ~= nil, '"editor/events/' .. path .. '.lua" does not return value')

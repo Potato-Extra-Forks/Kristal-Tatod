@@ -38,8 +38,6 @@
 ---@overload fun(...) : Transition
 local Transition, super = Class(Event)
 
-Transition.editor_sprite = "editor/transition"
-
 ---@param properties TransitionProperties
 function Transition:init(x, y, shape, properties)
     super.init(self, x, y, shape)

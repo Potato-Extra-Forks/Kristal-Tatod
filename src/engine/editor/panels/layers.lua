@@ -156,6 +156,8 @@ function EditorLayersPanel:getPropertiesTarget(layer)
     return {
         title = (layer.name or "Unnamed Layer") .. " (" .. (layer_type and layer_type.name or "Unknown") .. ")",
         properties = layer.properties,
+        property_types = layer._editor_property_types,
+        property_set = layer._editor_property_set,
         fields = {
             {
                 id = "color",
