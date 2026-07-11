@@ -1,0 +1,281 @@
+---@class EditorPlugins
+local EditorPlugins = {
+    directory = "editor/plugins",
+    debug_directory = "plugins",
+    plugins = {},
+    plugin_order = {},
+    controls = {},
+    panel_definitions = {},
+    menu_definitions = {},
+    editor = nil
+}
+
+local NIL_RESULT = {}
+local PluginMethods = {}
+
+local function tracebackError(value)
+    return debug.traceback(tostring(value), 2)
+end
+
+local function normalizeScriptPath(path)
+    path = tostring(path or ""):gsub("\\", "/"):gsub("%.lua$", "")
+    return path:gsub("%.", "/"):gsub("^/+", "")
+end
+
+local function namespaced(plugin, kind, id)
+    return string.format("plugin:%s:%s:%s", plugin.id, kind, id)
+end
+
+function PluginMethods:require(path, ...)
+    path = normalizeScriptPath(path)
+    local cached = self.loaded_scripts[path]
+    if cached ~= nil then return cached ~= NIL_RESULT and cached or nil end
+    local chunk = self.info.script_chunks[path] or self.info.script_chunks[path .. "/init"]
+    if not chunk then error(string.format("Plugin '%s' has no script '%s'", self.id, path), 2) end
+    if self.loading_scripts[path] then
+        error(string.format("Plugin '%s' has a circular require for '%s'", self.id, path), 2)
+    end
+
+    self.loading_scripts[path] = true
+    local previous_plugin = rawget(_G, "Plugin")
+    _G.Plugin = self
+    local arguments = { ... }
+    local success, result = xpcall(function() return chunk(unpack(arguments)) end, tracebackError)
+    _G.Plugin = previous_plugin
+    self.loading_scripts[path] = nil
+    if not success then error(result, 2) end
+    self.loaded_scripts[path] = result == nil and NIL_RESULT or result
+    return result
+end
+
+function PluginMethods:registerControl(id, control)
+    assert(type(id) == "string" and id ~= "", "Plugin controls require an id")
+    assert(not self.controls[id], "Duplicate plugin control id: " .. id)
+    if type(control) == "string" then control = self:require(control) end
+    assert(isClass(control), "Plugin controls must be an EditorControl class")
+    assert(control:includes(EditorControl), "Plugin controls must include EditorControl")
+    self.controls[id] = control
+    EditorPlugins.controls[namespaced(self, "control", id)] = control
+    return control
+end
+
+function PluginMethods:getControl(id)
+    return self.controls[id]
+end
+
+function PluginMethods:registerPanel(id, title, content_factory, options)
+    assert(type(id) == "string" and id ~= "", "Plugin panels require an id")
+    assert(not self.panels[id], "Duplicate plugin panel id: " .. id)
+    assert(type(content_factory) == "function", "Plugin panels require a content factory")
+    options = TableUtils.copy(options or {}, true)
+    local definition = {
+        plugin = self,
+        id = id,
+        panel_id = namespaced(self, "panel", id),
+        title = title or id,
+        content_factory = content_factory,
+        options = options,
+        region = options.region or "right"
+    }
+    self.panels[id] = definition
+    table.insert(EditorPlugins.panel_definitions, definition)
+    return definition
+end
+
+function PluginMethods:registerMenuItem(menu_id, id, label, options)
+    assert(type(menu_id) == "string" and menu_id ~= "", "Plugin menu items require a menu id")
+    assert(type(id) == "string" and id ~= "", "Plugin menu items require an id")
+    local definition = {
+        kind = "item", plugin = self, menu_id = menu_id,
+        id = namespaced(self, "menu", id), label = label or id, options = options or {}
+    }
+    table.insert(EditorPlugins.menu_definitions, definition)
+    return definition
+end
+
+function PluginMethods:registerMenuToggle(menu_id, id, label, get_checked, set_checked)
+    assert(type(get_checked) == "function" and type(set_checked) == "function",
+        "Plugin menu toggles require getter and setter callbacks")
+    local definition = {
+        kind = "toggle", plugin = self, menu_id = menu_id,
+        id = namespaced(self, "menu", id), label = label or id,
+        get_checked = get_checked, set_checked = set_checked
+    }
+    table.insert(EditorPlugins.menu_definitions, definition)
+    return definition
+end
+
+function PluginMethods:registerMenuProvider(menu_id, id, provider)
+    assert(type(provider) == "function", "Plugin menu providers require a callback")
+    local definition = {
+        kind = "provider", plugin = self, menu_id = menu_id,
+        id = namespaced(self, "menu", id), provider = provider
+    }
+    table.insert(EditorPlugins.menu_definitions, definition)
+    return definition
+end
+
+function EditorPlugins:reset()
+    self.plugins = {}
+    self.plugin_order = {}
+    self.controls = {}
+    self.panel_definitions = {}
+    self.menu_definitions = {}
+end
+
+function EditorPlugins:report(editor, message, detail)
+    editor:addWarning(message, detail, "editor_plugin")
+    print(message .. (detail and ("\n" .. detail) or ""))
+end
+
+function EditorPlugins:loadPlugin(editor, directory, folder, source)
+    local path = directory .. "/" .. folder
+    local info_path = path .. "/plugin.json"
+    if not love.filesystem.getInfo(info_path, "file") then return nil end
+
+    local success, info = pcall(function() return JSON.decode(love.filesystem.read(info_path)) end)
+    if not success or type(info) ~= "table" then
+        self:report(editor, "Could not load editor plugin metadata: " .. folder,
+            success and "plugin.json must contain a JSON object" or tostring(info))
+        return nil
+    end
+    if type(info.id) ~= "string" or info.id == "" then
+        self:report(editor, "Could not load editor plugin: " .. folder, "plugin.json requires a non-empty id")
+        return nil
+    end
+    if self.plugins[info.id] then
+        if source == "user" and self.plugins[info.id].info.source == "debug" then return nil end
+        self:report(editor, "Duplicate editor plugin id: " .. info.id, path)
+        return nil
+    end
+
+    info.path = path
+    info.source = source
+    info.script_chunks = {}
+    for _, script_path in ipairs(FileSystemUtils.getFilesRecursive(path, ".lua")) do
+        local chunk, load_error = love.filesystem.load(path .. "/" .. script_path .. ".lua")
+        if not chunk then
+            self:report(editor, string.format("Could not load script '%s' from editor plugin '%s'",
+                script_path, info.id), load_error)
+            return nil
+        end
+        info.script_chunks[script_path] = chunk
+    end
+
+    local plugin = setmetatable({
+        id = info.id, info = info, controls = {}, panels = {},
+        loaded_scripts = {}, loading_scripts = {}
+    }, { __index = PluginMethods })
+    self.plugins[plugin.id] = plugin
+    table.insert(self.plugin_order, plugin)
+
+    if info.script_chunks.plugin then
+        local loaded, result = xpcall(function() return plugin:require("plugin") end, tracebackError)
+        if not loaded then
+            self.plugins[plugin.id] = nil
+            TableUtils.removeValue(self.plugin_order, plugin)
+            self:report(editor, "Could not initialize editor plugin script: " .. plugin.id, result)
+            return nil
+        end
+        if type(result) == "table" and result ~= plugin then
+            for key, value in pairs(result) do plugin[key] = value end
+        end
+    end
+    return plugin
+end
+
+function EditorPlugins:scanDirectory(editor, directory, source)
+    if not love.filesystem.getInfo(directory, "directory") then return end
+    local folders = love.filesystem.getDirectoryItems(directory)
+    table.sort(folders)
+    for _, folder in ipairs(folders) do
+        local info = love.filesystem.getInfo(directory .. "/" .. folder)
+        if info and info.type == "directory" then self:loadPlugin(editor, directory, folder, source) end
+    end
+end
+
+function EditorPlugins:initialize(editor)
+    self:reset()
+    self.editor = editor
+    love.filesystem.createDirectory(self.directory)
+    self:scanDirectory(editor, self.debug_directory, "debug")
+    self:scanDirectory(editor, self.directory, "user")
+
+    for _, plugin in ipairs(self.plugin_order) do
+        local init = plugin.init or plugin.onInit
+        if init then
+            local panel_count = #self.panel_definitions
+            local menu_count = #self.menu_definitions
+            local success, message = xpcall(function() init(plugin, editor) end, tracebackError)
+            if not success then
+                while #self.panel_definitions > panel_count do table.remove(self.panel_definitions) end
+                while #self.menu_definitions > menu_count do table.remove(self.menu_definitions) end
+                for id in pairs(plugin.controls) do
+                    self.controls[namespaced(plugin, "control", id)] = nil
+                end
+                plugin.controls = {}
+                plugin.panels = {}
+                self:report(editor, "Editor plugin init failed: " .. plugin.id, message)
+            end
+        end
+    end
+end
+
+function EditorPlugins:applyMenuBar(editor)
+    for _, definition in ipairs(self.menu_definitions) do
+        local success, message = xpcall(function()
+            if definition.kind == "toggle" then
+                editor.menu_bar:registerToggle(definition.menu_id, definition.id, definition.label,
+                    definition.get_checked, definition.set_checked)
+            elseif definition.kind == "provider" then
+                editor.menu_bar:registerProvider(definition.menu_id, definition.id, definition.provider)
+            else
+                editor.menu_bar:registerItem(definition.menu_id, definition.id, definition.label,
+                    definition.options)
+            end
+        end, tracebackError)
+        if not success then
+            self:report(editor, "Could not register menu extension from plugin: " .. definition.plugin.id, message)
+        end
+    end
+end
+
+function EditorPlugins:createPanels(editor)
+    for _, definition in ipairs(self.panel_definitions) do
+        local success, content = xpcall(function()
+            return definition.content_factory(editor, definition.plugin)
+        end, tracebackError)
+        if success and isClass(content) and content:includes(EditorControl) then
+            local options = TableUtils.copy(definition.options, true)
+            options.region = nil
+            if options.recoverable == nil then options.recoverable = true end
+            local panel = EditorPanel(definition.panel_id, definition.title, content, options)
+            panel.editor_plugin = definition.plugin
+            panel.editor_plugin_id = definition.id
+            editor.dockspace:registerPanel(panel, definition.region)
+            definition.panel = panel
+        else
+            self:report(editor, "Could not create panel from editor plugin: " .. definition.plugin.id,
+                success and ("Panel '" .. definition.id .. "' did not return an EditorControl") or content)
+        end
+    end
+end
+
+function EditorPlugins:getPlugin(id)
+    return self.plugins[id]
+end
+
+function EditorPlugins:require(plugin_id, path, ...)
+    local plugin = assert(self.plugins[plugin_id], "Unknown editor plugin: " .. tostring(plugin_id))
+    return plugin:require(path, ...)
+end
+
+function EditorPlugins:getPlugins()
+    return self.plugin_order
+end
+
+function EditorPlugins:shutdown(editor)
+    if self.editor == editor then self.editor = nil end
+end
+
+return EditorPlugins

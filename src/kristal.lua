@@ -153,6 +153,7 @@ function love.load(args)
 
     -- setup structure
     love.filesystem.createDirectory("mods")
+    love.filesystem.createDirectory("editor/plugins")
     love.filesystem.createDirectory("saves")
 
     -- default registry
@@ -2361,6 +2362,16 @@ function libRequire(lib, path, ...)
     end
     Kristal.LoadedModScripts[full_path] = result
     return result
+end
+
+--- Executes a cached Lua script from an editor plugin.
+---@param plugin_id string The editor plugin ID.
+---@param path string The script path, using dot or slash separators.
+---@param ... any Arguments passed to the script the first time it is loaded.
+---@return any ... The script's cached return values.
+---@diagnostic disable-next-line: lowercase-global
+function pluginRequire(plugin_id, path, ...)
+    return EditorPlugins:require(plugin_id, path, ...)
 end
 
 return Kristal

@@ -331,6 +331,7 @@ function Editor:setupPanels(session)
                 self:setStandaloneGamePreviewEnabled(visible)
             end
         }), "right")
+    EditorPlugins:createPanels(self)
     self.dockspace.sizes.left = 260
     self.dockspace.minimum_center_width = SCREEN_WIDTH
     self.dockspace.minimum_center_height = SCREEN_HEIGHT + 28
@@ -418,9 +419,11 @@ function Editor:enter(previous, options)
     self.menu_bar = EditorMenuBar(self)
     self.editor_cursor = EditorCursor()
     self.editor_cursor:setCustomEnabled(self.use_custom_cursors)
-    self:registerMenuBar()
 
     local context_document, restored_by_panel = self:setupMapDocuments(session)
+    EditorPlugins:initialize(self)
+    self:registerMenuBar()
+    EditorPlugins:applyMenuBar(self)
     self:setupPanels(session)
     self:restoreEntryState(session, options, context_document, restored_by_panel,
         game_center_x, game_center_y)
@@ -428,6 +431,7 @@ end
 
 function Editor:leave()
     self:clearGameObjectSelection()
+    EditorPlugins:shutdown(self)
     if not self.session_saved_for_exit then self:saveSession() end
     self.dockspace:setFocus(nil)
     local game_center_x, game_center_y = self:getGameCanvasScreenCenter()
