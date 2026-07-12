@@ -4,21 +4,26 @@ local EditorMapReader, super = Class(MapReader)
 
 EditorMapReader.FORMAT = "editor"
 EditorMapReader.LEGACY_FORMAT = false
+EditorMapReader.operations = EditorFormat.mapOperations
 
 function EditorMapReader:initialize(data)
-    error("EditorMapReader is a placeholder; the Kristal editor map format is not implemented", 2)
+    return EditorFormat.initializeMap(self.map, data, self)
 end
 
 function EditorMapReader:read(data)
-    error("EditorMapReader is a placeholder; the Kristal editor map format is not implemented", 2)
+    return EditorFormat.readMap(self.map, data, self)
 end
 
 function EditorMapReader.convertLegacyData(data, options)
-    return nil, "Legacy Tiled map conversion is not implemented"
+    return EditorFormat.convertTiledMap(data, options)
 end
 
 function EditorMapReader.saveData(data, path, options)
-    return false, "The Kristal editor map format is not implemented"
+    return EditorFormat.saveMapData(data, path, options)
+end
+
+function EditorMapReader:save(path, options)
+    return EditorFormat.saveMapData(self.map.data, path, options)
 end
 
 return EditorMapReader

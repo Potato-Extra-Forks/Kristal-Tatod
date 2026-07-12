@@ -39,9 +39,8 @@ function TiledMapReader:read(data)
     return self:call("loadMapData", data)
 end
 
---- Conversion and serialization are separate placeholders so the eventual
---- editor format can define each stage without changing the legacy reader API.
-function TiledMapReader:saveAsEditorFormat(path, options)
+--- Always saves as the editor format, cause i don't really wanna write a legacy saver...
+function TiledMapReader:save(path, options)
     local data, reason = EditorMapReader.convertLegacyData(self.map.data, options)
     if not data then return false, reason end
     return EditorMapReader.saveData(data, path, options)

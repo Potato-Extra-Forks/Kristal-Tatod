@@ -2,6 +2,9 @@
 ---@overload fun(tileset: Tileset): TiledTilesetReader
 local TiledTilesetReader, super = Class(TilesetReader)
 
+TiledTilesetReader.FORMAT = "tiled"
+TiledTilesetReader.LEGACY_FORMAT = true
+
 local operations = {}
 TiledTilesetReader.operations = operations
 
@@ -79,6 +82,13 @@ function TiledTilesetReader:initialize(data, path, base_dir)
             tileset.quads[i] = love.graphics.newQuad(tx, ty, tileset.tile_width, tileset.tile_height, tw, th)
         end
     end
+end
+
+--- Always saves as the editor format, cause i don't really wanna write a legacy saver...
+function TiledTilesetReader:save(path, options)
+    local data, reason = EditorTilesetReader.convertLegacyData(self.tileset.data, options)
+    if not data then return false, reason end
+    return EditorTilesetReader.saveData(data, path, options)
 end
 
 function operations.loadTextureFromImagePath(tileset, filename)

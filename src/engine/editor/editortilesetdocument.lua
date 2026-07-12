@@ -46,6 +46,18 @@ function EditorTilesetDocument:isDirty()
     return (self.history_revision or 0) ~= (self.saved_history_revision or 0)
 end
 
+function EditorTilesetDocument:getFormatContext()
+    return EditorFormat.getTilesetContext(self)
+end
+
+function EditorTilesetDocument:buildEditorFormatData(options)
+    return EditorFormat.buildTilesetData(self, options)
+end
+
+function EditorTilesetDocument:save(path, options)
+    return EditorFormat.saveTilesetDocument(self, path, options)
+end
+
 function EditorTilesetDocument:getName()
     return self.data.name or self.id
 end

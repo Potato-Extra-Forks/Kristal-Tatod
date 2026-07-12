@@ -32,6 +32,10 @@ function Tileset:loadTextureFromImagePath(filename)
     return self.reader:call("loadTextureFromImagePath", filename)
 end
 
+function Tileset:save(path, options)
+    return self.reader:save(path, options)
+end
+
 function Tileset:getAnimation(id)
     local info = self.tile_info[id]
     return info and info.animation

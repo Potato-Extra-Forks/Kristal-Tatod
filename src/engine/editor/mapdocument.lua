@@ -117,6 +117,18 @@ function EditorMapDocument:isDirty()
     return (self.history_revision or 0) ~= (self.saved_history_revision or 0)
 end
 
+function EditorMapDocument:getFormatContext(map_id)
+    return EditorFormat.getMapContext(self, map_id)
+end
+
+function EditorMapDocument:buildEditorFormatData(map_id, options)
+    return EditorFormat.buildMapData(self, map_id, options)
+end
+
+function EditorMapDocument:save(path, options, map_id)
+    return EditorFormat.saveMapDocument(self, path, options, map_id)
+end
+
 function EditorMapDocument:getEditableLayers(id)
     id = id or self.primary_map_id
     if not id then return {} end

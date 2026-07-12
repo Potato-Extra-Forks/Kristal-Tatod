@@ -158,6 +158,7 @@ SmallFaceText = require("src.engine.game.common.smallfacetext")
 
 World = require("src.engine.game.world")
 LayerTypeRegistry = require("src.engine.game.world.layertyperegistry")
+EditorFormat = require("src.engine.game.world.editorformat")
 MapReader = require("src.engine.game.world.readers.mapreader")
 TiledMapReader = require("src.engine.game.world.readers.tiledmapreader")
 EditorMapReader = require("src.engine.game.world.readers.editormapreader")

@@ -2,6 +2,52 @@
 ---@overload fun(): LayerTypeRegistry
 local LayerTypeRegistry = Class()
 
+local DEFAULT_KINDS = {
+    {
+        id = "group",
+        format = {
+            "id",
+            "name",
+            "layers"
+        }
+    },
+    {
+        id = "tile",
+        format = {
+            "default",
+            "tileset",
+            "chunks",
+        },
+        extra_format = {
+            ["chunks"] = {
+                "x",
+                "y",
+                "tile_data"
+            }
+        }
+    },
+    {
+        id = "object",
+        format = {
+            "default",
+            "draw_order",
+            "objects"
+        }
+    },
+    {
+        id = "image",
+        format = {
+            "default",
+            "image",
+            "image_width",
+            "image_height",
+            "repeat_x",
+            "repeat_y",
+            "transparent_color"
+        }
+    }
+}
+
 local DEFAULT_TYPES = {
     { id = "default",        name = "Unknown",         kind = "object", icon = "editor/ui/layer/default",        color = { 0.8, 0.8, 0.82, 1 } },
     { id = "tile",           name = "Tiles",           kind = "tile",   icon = "editor/ui/layer/tile",           color = { 0.8, 0.8, 0.82, 1 } },
@@ -18,8 +64,12 @@ local DEFAULT_TYPES = {
 }
 
 function LayerTypeRegistry:init()
+    LayerTypeRegistry.kinds = {}
     self.types = {}
     self.order = {}
+    for _, definition in ipairs(DEFAULT_KINDS) do
+        table.insert(self.kinds, definition)
+    end
     for _, definition in ipairs(DEFAULT_TYPES) do
         self:register(definition.id, definition)
     end

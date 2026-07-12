@@ -86,8 +86,8 @@ function Map:load()
     end
 end
 
-function Map:saveAsEditorFormat(path, options)
-    return self.reader:saveAsEditorFormat(path, options)
+function Map:save(path, options)
+    return self.reader:save(path, options)
 end
 
 function Map:onEnter() end

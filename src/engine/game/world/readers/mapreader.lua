@@ -35,8 +35,8 @@ function MapReader:isLegacyFormat()
     return self.LEGACY_FORMAT == true
 end
 
-function MapReader:saveAsEditorFormat(path, options)
-    return false, string.format("Map format '%s' cannot be saved as an editor map", tostring(self:getFormat()))
+function MapReader:save(path, options)
+    return false, string.format("Map format '%s' has no saving implementation!", tostring(self:getFormat()))
 end
 
 return MapReader
