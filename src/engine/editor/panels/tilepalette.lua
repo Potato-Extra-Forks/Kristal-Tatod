@@ -11,6 +11,9 @@ function EditorTilePalette:init(editor, options)
     self.document = nil
     self.scroll_row = 0
     self.scroll_column = 0
+    self.zoom = 1
+    self.minimum_zoom = 0.25
+    self.maximum_zoom = 4
     self.random_mode = false
     self.selection_start = nil
     self.selection_end = nil
@@ -20,6 +23,9 @@ function EditorTilePalette:init(editor, options)
     self.flip_x_button = self:addChild(EditorButton("Flip X", function() self:flipStamp(true) end))
     self.flip_y_button = self:addChild(EditorButton("Flip Y", function() self:flipStamp(false) end))
     self.rotate_button = self:addChild(EditorButton("Rotate", function() self:rotateStamp() end))
+    self.zoom_out_button = self:addChild(EditorButton("-", function() self:stepZoom(-1) end))
+    self.zoom_label_button = self:addChild(EditorButton("100%", function() self:resetZoom() end))
+    self.zoom_in_button = self:addChild(EditorButton("+", function() self:stepZoom(1) end))
     self.scrollbar = self:addChild(EditorScrollbar({ width = 12,
         on_changed = function(value) self.scroll_row = self:getMaxScroll() * value end }))
     self.horizontal_scrollbar = self:addChild(EditorScrollbar({ height = 12, horizontal = true,
@@ -28,10 +34,14 @@ function EditorTilePalette:init(editor, options)
     self.flip_x_button.visible = self.show_tools
     self.flip_y_button.visible = self.show_tools
     self.rotate_button.visible = self.show_tools
+    self.zoom_out_button.visible = self.show_tools
+    self.zoom_label_button.visible = self.show_tools
+    self.zoom_in_button.visible = self.show_tools
 end
 
 function EditorTilePalette:getContentTop()
-    return self.show_tools and 40 or 4
+    if not self.show_tools then return 4 end
+    return self.width < 460 and 72 or 40
 end
 
 function EditorTilePalette:setTilesetDocument(document)
@@ -48,8 +58,38 @@ function EditorTilePalette:getColumns()
 end
 
 function EditorTilePalette:getCellSize()
-    if not self.document then return 40, 40 end
-    return self.document:getPaletteTileSize()
+    local width, height = 40, 40
+    if self.document then width, height = self.document:getPaletteTileSize() end
+    return math.max(1, width * self.zoom), math.max(1, height * self.zoom)
+end
+
+function EditorTilePalette:setZoom(zoom, anchor_x, anchor_y)
+    zoom = MathUtils.clamp(tonumber(zoom) or 1, self.minimum_zoom, self.maximum_zoom)
+    if zoom == self.zoom then return false end
+    local old_width, old_height = self:getCellSize()
+    anchor_x = anchor_x or self.width / 2
+    anchor_y = anchor_y or (self:getContentTop() + self.height) / 2
+    local tile_x = self.scroll_column + (anchor_x - 4) / old_width
+    local tile_y = self.scroll_row + (anchor_y - self:getContentTop()) / old_height
+    self.zoom = zoom
+    local new_width, new_height = self:getCellSize()
+    self.scroll_column = tile_x - (anchor_x - 4) / new_width
+    self.scroll_row = tile_y - (anchor_y - self:getContentTop()) / new_height
+    self.scroll_column = MathUtils.clamp(self.scroll_column, 0, self:getMaxHorizontalScroll())
+    self.scroll_row = MathUtils.clamp(self.scroll_row, 0, self:getMaxScroll())
+    if self.zoom_label_button then
+        self.zoom_label_button.label = string.format("%d%%", MathUtils.round(self.zoom * 100))
+    end
+    return true
+end
+
+function EditorTilePalette:stepZoom(direction, anchor_x, anchor_y)
+    local factor = math.sqrt(2) ^ direction
+    return self:setZoom(self.zoom * factor, anchor_x, anchor_y)
+end
+
+function EditorTilePalette:resetZoom(anchor_x, anchor_y)
+    return self:setZoom(1, anchor_x, anchor_y)
 end
 
 function EditorTilePalette:getVisibleColumns()
@@ -195,7 +235,11 @@ function EditorTilePalette:onMouseReleased(_, _, button)
 end
 
 function EditorTilePalette:onWheelMoved(x, y)
-    if Input.keyDown("shift") or x ~= 0 then
+    if Input.ctrl() then
+        local mouse_x, mouse_y = love.mouse.getPosition()
+        local local_x, local_y = self:toLocal(mouse_x, mouse_y)
+        return self:stepZoom(y ~= 0 and y or x, local_x, local_y)
+    elseif Input.keyDown("shift") or x ~= 0 then
         local movement = x ~= 0 and x or y
         self.scroll_column = MathUtils.clamp(self.scroll_column - movement * 2,
             0, self:getMaxHorizontalScroll())
@@ -207,10 +251,17 @@ end
 
 function EditorTilePalette:update(dt)
     if self.show_tools then
-        self.random_toggle:setBounds(8, 7, 92, 28)
-        self.flip_x_button:setBounds(108, 7, 68, 28)
-        self.flip_y_button:setBounds(182, 7, 68, 28)
-        self.rotate_button:setBounds(256, 7, 68, 28)
+        self.random_toggle:setBounds(8, 7, 82, 28)
+        self.flip_x_button:setBounds(96, 7, 58, 28)
+        self.flip_y_button:setBounds(160, 7, 58, 28)
+        self.rotate_button:setBounds(224, 7, 62, 28)
+        local narrow = self.width < 460
+        local zoom_y = narrow and 39 or 7
+        local zoom_x = narrow and 8 or (self.width - 148)
+        self.zoom_out_button:setBounds(zoom_x, zoom_y, 36, 28)
+        self.zoom_label_button:setBounds(zoom_x + 40, zoom_y, 64, 28)
+        self.zoom_in_button:setBounds(zoom_x + 108, zoom_y, 36, 28)
+        self.zoom_label_button.label = string.format("%d%%", MathUtils.round(self.zoom * 100))
     end
     local cell_width, cell_height = self:getCellSize()
     self.scroll_y = self.scroll_row * cell_height

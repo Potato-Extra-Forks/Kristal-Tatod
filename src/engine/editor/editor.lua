@@ -313,6 +313,10 @@ function Editor:registerMenuBar()
         is_enabled = function() return self:hasUnsavedChanges() end,
         on_activate = function() self:saveAllDocuments() end
     })
+    self.menu_bar:registerItem("file", "exit_editor",
+        self.return_to_menu_on_exit and "Return to Main Menu" or "Return to Game", {
+            on_activate = function() Kristal.exitEditor() end
+        })
     self.menu_bar:registerItem("edit", "undo", "Undo", {
         is_enabled = function() return self.history:canUndo() end,
         on_activate = function() self:undo() end
@@ -363,15 +367,31 @@ end
 
 function Editor:registerEditorTools()
     self.tool_registry = EditorToolRegistry()
-    self.tool_registry:register("select", { name = "Select", icon = "editor/ui/tool/select" })
-    self.tool_registry:register("object", {
-        name = "Add Object", short_name = "Object", icon = "editor/ui/tool/shape_point"
+    self.tool_registry:register("select", {
+        name = "Select", icon = "editor/ui/tool/select", keybind = "editor_tool_select"
     })
-    self.tool_registry:register("shape", { name = "Shape", icon = "editor/ui/tool/shape_rect" })
-    self.tool_registry:register("tile_brush", { name = "Tile Brush", short_name = "Brush", icon = "editor/ui/tool/brush" })
-    self.tool_registry:register("tile_fill", { name = "Tile Fill", short_name = "Fill", icon = "editor/ui/tool/bucket" })
-    self.tool_registry:register("eraser", { name = "Eraser", icon = "editor/ui/tool/eraser" })
-    self.tool_registry:register("link", { name = "Link Objects", short_name = "Link", icon = "editor/ui/tool/link" })
+    self.tool_registry:register("object", {
+        name = "Add Object", short_name = "Object", icon = "editor/ui/tool/shape_point",
+        keybind = "editor_tool_object"
+    })
+    self.tool_registry:register("shape", {
+        name = "Shape", icon = "editor/ui/tool/shape_rect", keybind = "editor_tool_shape"
+    })
+    self.tool_registry:register("tile_brush", {
+        name = "Tile Brush", short_name = "Brush", icon = "editor/ui/tool/brush",
+        keybind = "editor_tool_tile_brush"
+    })
+    self.tool_registry:register("tile_fill", {
+        name = "Tile Fill", short_name = "Fill", icon = "editor/ui/tool/bucket",
+        keybind = "editor_tool_tile_fill"
+    })
+    self.tool_registry:register("eraser", {
+        name = "Eraser", icon = "editor/ui/tool/eraser", keybind = "editor_tool_eraser"
+    })
+    self.tool_registry:register("link", {
+        name = "Link Objects", short_name = "Link", icon = "editor/ui/tool/link",
+        keybind = "editor_tool_link"
+    })
     self.active_tool = "select"
     self.selected_event_id = nil
     self.shape_mode = "rectangle"
@@ -452,6 +472,12 @@ function Editor:registerEditorSettings(session)
     end
     keybind("keybinds.toggle_editor", "Toggle Editor", "editor")
     keybind("keybinds.toggle_map_view", "Toggle Map/Game View", "editor_view")
+    keybind("keybinds.delete_selection", "Delete Selection", "editor_delete")
+    for _, tool in ipairs(self.tool_registry:getAll()) do
+        if tool.keybind then
+            keybind("keybinds.tool_" .. tool.id, tool.name .. " Tool", tool.keybind)
+        end
+    end
 end
 
 function Editor:setupTilesetDocuments(session)
@@ -508,9 +534,12 @@ function Editor:showTilesetEditor(document)
 end
 
 function Editor:setShapeMode(mode)
-    local modes = { point = true, line = true, rectangle = true, ellipse = true, polygon = true }
+    local modes = {
+        point = true, line = true, rectangle = true, ellipse = true,
+        polygon = true, polyline = true
+    }
     if not modes[mode] then return false end
-    if mode ~= "polygon" then self:cancelPolygonBuilds() end
+    if self.shape_mode ~= mode then self:cancelPolygonBuilds() end
     self.shape_mode = mode
     self:setActiveTool("shape")
     return true
@@ -522,7 +551,8 @@ function Editor:getShapeModes()
         { id = "line", name = "Line", icon = "editor/ui/tool/shape_line" },
         { id = "rectangle", name = "Rectangle", icon = "editor/ui/tool/shape_rect" },
         { id = "ellipse", name = "Ellipse", icon = "editor/ui/tool/shape_ellipse" },
-        { id = "polygon", name = "Polygon", icon = "editor/ui/tool/shape_poly" }
+        { id = "polygon", name = "Polygon", icon = "editor/ui/tool/shape_poly" },
+        { id = "polyline", name = "Polyline", icon = "editor/ui/tool/shape_polyline" }
     }
 end
 
@@ -752,6 +782,7 @@ function Editor:enter(previous, options)
     options = options or {}
     self:resetEditingMusic()
     self.source_state = options.source_state or previous
+    self.return_to_menu_on_exit = options.return_to_menu == true
     self.entry_transition = options.entry_transition
     self.exit_transition = nil
     self.session_saved_for_exit = false
@@ -768,6 +799,7 @@ function Editor:enter(previous, options)
     self.game_preview_snapshot_document = nil
     self.game_preview_snapshot_save_id = nil
     self.game_music_suspended_by_editor = false
+    self.stale_runtime_maps = {}
     self.project_id = options.project_id or (Mod and Mod.info.id)
     self.map_id = options.map_id or (Game.world and Game.world.map and Game.world.map.id)
     self.message_bar = EditorMessageBar()
@@ -853,11 +885,13 @@ function Editor:leave()
     self.dockspace = nil
     self.menu_bar = nil
     self.editor_cursor = nil
+    self.return_to_menu_on_exit = nil
     self.previous_mouse_cursor = nil
     self.message_bar = nil
     self.map_documents = nil
     self.active_document = nil
     self.game_preview = nil
+    self.stale_runtime_maps = nil
     self.game_view = nil
     self.game_panel = nil
     self.game_preview_panel = nil
@@ -1069,6 +1103,17 @@ function Editor:saveMapDocumentToProject(document, options)
     for _, entry in ipairs(prepared) do
         Registry.registerMapData(entry.id, entry.data, EditorMapReader)
         document:adoptSavedMapData(entry.id, entry.data)
+        for _, candidate in ipairs(self.map_documents or {}) do
+            if candidate ~= document and candidate.map_lookup[entry.id] then
+                candidate:invalidatePreview(entry.id)
+            end
+        end
+        if self.standalone_preview_document
+            and self.standalone_preview_document ~= document
+            and self.standalone_preview_document.map_lookup[entry.id] then
+            self.standalone_preview_document:adoptSavedMapData(entry.id, entry.data)
+        end
+        self.stale_runtime_maps[entry.id] = true
     end
     self.history:markSaved(document)
     self:clearDiagnostics("editor_save")
@@ -1541,7 +1586,8 @@ function Editor:getMapObjectPropertiesTarget(selection)
                     { value = "rectangle", label = "Rectangle" },
                     { value = "ellipse", label = "Ellipse" },
                     { value = "line", label = "Line" },
-                    { value = "polygon", label = "Polygon" }
+                    { value = "polygon", label = "Polygon" },
+                    { value = "polyline", label = "Polyline" }
                 },
                 rebuild = true
             },
@@ -1987,7 +2033,11 @@ function Editor:setTileEditingMode(enabled)
         self.dockspace:setFocus(self.active_document.map_view)
         return true
     end
-    return self:showGamePreview()
+    local previous_mode = self.tile_editing_mode
+    self.tile_editing_mode = false
+    local success = self:showGamePreview({ reload_runtime = true })
+    if not success then self.tile_editing_mode = previous_mode end
+    return success
 end
 
 function Editor:detachGamePreview()
@@ -2052,10 +2102,12 @@ function Editor:toggleGamePreviewPaused()
     return self:setGamePreviewPaused(not self.game_preview_paused)
 end
 
-function Editor:setStandaloneGamePreviewMap(id)
+function Editor:setStandaloneGamePreviewMap(id, options)
+    options = options or {}
     if not self:isStandaloneGamePreviewEnabled() or not hasMap(id) then return false end
     if self.game_panel == self.game_preview_panel and self.live_document == self.standalone_preview_document
-        and self.standalone_preview_map_id == id then
+        and self.standalone_preview_map_id == id and not self.stale_runtime_maps[id]
+        and not options.reload_runtime then
         self.dockspace:setFocus(self.game_preview)
         return true
     end
@@ -2066,7 +2118,8 @@ function Editor:setStandaloneGamePreviewMap(id)
     self.standalone_preview_document = EditorMapDocument(self, id)
     self.game_preview:setDocument(self.standalone_preview_document)
     self.game_preview.canvas_positioned = false
-    if id ~= self.map_id and not self:loadRuntimeMap(id) then return false end
+    if (options.reload_runtime or id ~= self.map_id or self.stale_runtime_maps[id])
+        and not self:loadRuntimeMap(id) then return false end
     if not self:captureGamePreviewSnapshot(self.standalone_preview_document) then return false end
     self.game_preview_panel:setContent(self.game_preview)
     self.live_document = self.standalone_preview_document
@@ -2183,6 +2236,7 @@ function Editor:loadRuntimeMap(id)
     Game.state = "OVERWORLD"
     Game.world:loadMap(id)
     self.map_id = id
+    self.stale_runtime_maps[id] = nil
     return true
 end
 
@@ -2233,9 +2287,11 @@ end
 function Editor:showGamePreview(options)
     options = options or {}
     if self:isStandaloneGamePreviewEnabled() and not options.ignore_standalone then
-        if self.game_panel ~= self.game_preview_panel then
-            return self:setStandaloneGamePreviewMap(self.standalone_preview_map_id
-                or (self.active_document and self.active_document.primary_map_id))
+        local id = self.standalone_preview_map_id
+            or (self.active_document and self.active_document.primary_map_id)
+        if self.game_panel ~= self.game_preview_panel or self.stale_runtime_maps[id]
+            or options.reload_runtime then
+            return self:setStandaloneGamePreviewMap(id, options)
         end
         self.dockspace:setFocus(self.game_preview)
         return true
@@ -2249,7 +2305,9 @@ function Editor:showGamePreview(options)
     end
     self.active_document = document
     self.game_preview:setDocument(document)
-    if document.primary_map_id ~= self.map_id and not self:loadRuntimeMap(document.primary_map_id) then
+    if (options.reload_runtime or document.primary_map_id ~= self.map_id
+        or self.stale_runtime_maps[document.primary_map_id])
+        and not self:loadRuntimeMap(document.primary_map_id) then
         return false
     end
     if not self:captureGamePreviewSnapshot(document) then return false end
@@ -2607,8 +2665,10 @@ function Editor:onKeyPressed(key, is_repeat)
         return self.dockspace:onKeyPressed(key, is_repeat) ~= false
     end
     if self.menu_bar:onKeyPressed(key) then return true end
+    local focused = self.dockspace.focused_control
+    local editing_text = focused and focused.accepts_text_input
     if Input.ctrl() and not is_repeat
-        and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
+        and not editing_text then
         if key == "s" then
             if Input.shift() then return self:saveAllDocuments() end
             return self:saveActiveDocument()
@@ -2616,23 +2676,39 @@ function Editor:onKeyPressed(key, is_repeat)
         if key == "z" then return Input.shift() and self:redo() or self:undo() end
         if key == "y" then return self:redo() end
     end
+    if not is_repeat and not editing_text and self.tile_editing_mode then
+        if Input.is("editor_delete", key) then
+            self.consumed_editor_keys[key] = true
+            Input.clear("editor_delete")
+            self:deleteSelectedMapObject(false)
+            return true
+        end
+        for _, tool in ipairs(self.tool_registry:getAll()) do
+            if tool.keybind and Input.is(tool.keybind, key) then
+                self.consumed_editor_keys[key] = true
+                Input.clear(tool.keybind)
+                self:setActiveTool(tool.id)
+                return true
+            end
+        end
+    end
     if key == "escape" and (self.asset_drag or self.object_reference_drag or self.drag_preview) then
         self.asset_drag, self.object_reference_drag, self.drag_preview = nil, nil, nil
         return true
     end
     if key == "escape" and self.placement_event_id
-        and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
+        and not editing_text then
         self:setActiveTool("select")
         return true
     end
     if key == "space" and not is_repeat and self.live_document
-        and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
+        and not editing_text then
         self.consumed_editor_keys[key] = true
         self:toggleGamePreviewPaused()
         return true
     end
     if key == "g" and not is_repeat
-        and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
+        and not editing_text then
         self.consumed_editor_keys[key] = true
         self.show_tile_grid = not self.show_tile_grid
         return true
@@ -2688,6 +2764,7 @@ function Editor:finishExitTransition(transition)
     local snapshot_save_id = self.game_preview_snapshot_save_id
     local resume_game_music = self.game_music_suspended_by_editor == true
     local game_lock_movement = self.game_preview_movement_lock
+    local return_to_menu = self.return_to_menu_on_exit == true
     self.game_preview_snapshot = nil
     self.game_preview_snapshot_document = nil
     self.game_preview_snapshot_save_id = nil
@@ -2699,7 +2776,8 @@ function Editor:finishExitTransition(transition)
         game_snapshot = snapshot,
         game_snapshot_save_id = snapshot_save_id,
         resume_game_music = resume_game_music,
-        game_lock_movement = game_lock_movement
+        game_lock_movement = game_lock_movement,
+        return_to_menu = return_to_menu
     })
 end
 

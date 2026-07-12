@@ -116,14 +116,16 @@ function EditorEvent:drawPreviewIcon(x, y, width, height, alpha)
 end
 
 function EditorEvent:drawBounds(alpha)
-    if self.width == 0 and self.height == 0 then return end
+    if self.width == 0 and self.height == 0
+        and not self.data.polygon and not self.data.polyline then return end
     alpha = alpha or 1
     local previous_width = love.graphics.getLineWidth()
     local color = self.layer_color
     love.graphics.push()
     love.graphics.translate(self.x, self.y)
     love.graphics.rotate(self.rotation)
-    love.graphics.setLineWidth(1)
+    local thickness = self.data.shape_data and tonumber(self.data.shape_data.thickness)
+    love.graphics.setLineWidth(math.max(1, thickness or 1))
     Draw.setColor(color[1] or 1, color[2] or 1, color[3] or 1,
         math.min(color[4] or 1, 0.9) * alpha)
     if self.data.shape == "ellipse" then
@@ -136,12 +138,11 @@ function EditorEvent:drawBounds(alpha)
         end
         love.graphics.polygon("line", points)
     elseif self.data.polyline and #self.data.polyline >= 2 then
-        local points = {}
-        for _, point in ipairs(self.data.polyline) do
-            table.insert(points, point.x or point[1] or 0)
-            table.insert(points, point.y or point[2] or 0)
+        for _, edge in ipairs(TiledUtils.getPolylineEdges(self.data, #self.data.polyline)) do
+            local first, second = self.data.polyline[edge[1]], self.data.polyline[edge[2]]
+            love.graphics.line(first.x or first[1] or 0, first.y or first[2] or 0,
+                second.x or second[1] or 0, second.y or second[2] or 0)
         end
-        love.graphics.line(points)
     else
         love.graphics.rectangle("line", 0, 0, self.width, self.height)
     end

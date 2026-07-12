@@ -191,6 +191,13 @@ function EditorMapView:snapToMapGrid(entry, world_x, world_y)
         entry.y + MathUtils.round((world_y - entry.y) / tile_height) * tile_height
 end
 
+function EditorMapView:snapPointShapeToMapGrid(entry, world_x, world_y)
+    if not Input.ctrl() then return world_x, world_y end
+    local tile_width, tile_height = entry.tile_width or 40, entry.tile_height or 40
+    return entry.x + MathUtils.round((world_x - entry.x) / tile_width) * tile_width,
+        entry.y + MathUtils.round((world_y - entry.y) / tile_height) * tile_height
+end
+
 function EditorMapView:getTileEditTarget(world_x, world_y)
     local entry = self.document:getMapAt(world_x, world_y)
     if not entry then return nil, "Move the cursor inside a map before editing tiles" end
@@ -379,10 +386,12 @@ end
 
 function EditorMapView:getPolygonVertexAt(world_x, world_y)
     local selections = self.editor and self.editor:getSelectedMapObjects(self.document) or {}
-    if #selections ~= 1 or not selections[1].data.polygon then return nil end
+    if #selections ~= 1 then return nil end
+    local points = self.document:getPointShape(selections[1])
+    if not points then return nil end
     local distance = 9 / self.view_zoom
-    for index in ipairs(selections[1].data.polygon) do
-        local x, y = self.document:getPolygonWorldPoint(selections[1], index)
+    for index in ipairs(points) do
+        local x, y = self.document:getPointShapeWorldPoint(selections[1], index)
         if x and math.abs(world_x - x) <= distance and math.abs(world_y - y) <= distance then
             return selections[1], index
         end
@@ -390,7 +399,7 @@ function EditorMapView:getPolygonVertexAt(world_x, world_y)
 end
 
 function EditorMapView:getResizeCornerAt(selection, world_x, world_y)
-    if not selection or selection.data.polygon then return nil end
+    if not selection or selection.data.polygon or selection.data.shape == "polyline" then return nil end
     local width, height = selection.data.width or 0, selection.data.height or 0
     if width == 0 and height == 0 then return nil end
     local object_x, object_y = self.document:getObjectWorldPosition(selection)
@@ -426,22 +435,25 @@ function EditorMapView:getResizeCursor(selection, corner)
 end
 
 function EditorMapView:openPolygonVertexContext(selection, index, x, y)
-    local points = selection.data.polygon
-    local next_index = index % #points + 1
-    local x1, y1 = self.document:getPolygonWorldPoint(selection, index)
-    local x2, y2 = self.document:getPolygonWorldPoint(selection, next_index)
-    local items = {
-        { label = "Insert Vertex After", action = function()
-            local inserted = self.editor:performHistoryEdit("Insert Polygon Vertex", self.document, function()
-                return self.document:insertPolygonWorldPoint(selection, index, (x1 + x2) / 2, (y1 + y2) / 2)
+    local points = self.document:getPointShape(selection)
+    local shape = selection.data.polygon and "Polygon" or "Polyline"
+    local next_index = selection.data.polygon and index % #points + 1 or index + 1
+    local items = {}
+    if points[next_index] then
+        local x1, y1 = self.document:getPointShapeWorldPoint(selection, index)
+        local x2, y2 = self.document:getPointShapeWorldPoint(selection, next_index)
+        table.insert(items, { label = "Insert Vertex After", action = function()
+            local inserted = self.editor:performHistoryEdit("Insert " .. shape .. " Vertex", self.document, function()
+                return self.document:insertPointShapeWorldPoint(selection, index, (x1 + x2) / 2, (y1 + y2) / 2)
             end)
             if inserted then self.editor:selectMapObjects({ selection }, selection) end
-        end }
-    }
-    if #points > 3 then
+        end })
+    end
+    local minimum = selection.data.polygon and 3 or 2
+    if #points > minimum then
         table.insert(items, { label = "Delete Vertex", action = function()
-            if self.editor:performHistoryEdit("Delete Polygon Vertex", self.document, function()
-                return self.document:removePolygonPoint(selection, index)
+            if self.editor:performHistoryEdit("Delete " .. shape .. " Vertex", self.document, function()
+                return self.document:removePointShapePoint(selection, index)
             end) then
                 self.editor:selectMapObjects({ selection }, selection)
             end
@@ -463,13 +475,24 @@ function EditorMapView:drawSelectedObject()
         love.graphics.rotate(math.rad(selection.data.rotation or 0))
         if width == 0 and height == 0 then
             love.graphics.circle("line", 0, 0, 8 / self.view_zoom)
-        elseif selection.data.polygon and #selection.data.polygon >= 3 then
+        elseif (selection.data.polygon and #selection.data.polygon >= 3)
+            or (selection.data.shape == "polyline" and selection.data.polyline
+                and #selection.data.polyline >= 2) then
+            local points = selection.data.polygon or selection.data.polyline
             local coordinates = {}
-            for _, point in ipairs(selection.data.polygon) do
+            for _, point in ipairs(points) do
                 table.insert(coordinates, point.x or point[1] or 0)
                 table.insert(coordinates, point.y or point[2] or 0)
             end
-            love.graphics.polygon("line", coordinates)
+            if selection.data.polygon then
+                love.graphics.polygon("line", coordinates)
+            else
+                for _, edge in ipairs(TiledUtils.getPolylineEdges(selection.data, #points)) do
+                    local first, second = points[edge[1]], points[edge[2]]
+                    love.graphics.line(first.x or first[1] or 0, first.y or first[2] or 0,
+                        second.x or second[1] or 0, second.y or second[2] or 0)
+                end
+            end
             if #selections == 1 then
                 local radius = 5 / self.view_zoom
                 for index = 1, #coordinates, 2 do
@@ -526,7 +549,7 @@ function EditorMapView:drawShapePreview()
         love.graphics.setLineWidth(2 / self.view_zoom)
         Draw.setColor(0.48, 0.78, 1, 0.9)
         if #coordinates >= 4 then love.graphics.line(coordinates) end
-        if #build.points >= 2 and build.current_x then
+        if build.shape == "polygon" and #build.points >= 2 and build.current_x then
             Draw.setColor(0.48, 0.78, 1, 0.45)
             love.graphics.line(build.current_x, build.current_y, build.points[1].x, build.points[1].y)
         end
@@ -551,7 +574,7 @@ function EditorMapView:drawShapePreview()
     end
 end
 
-function EditorMapView:finishPolygon()
+function EditorMapView:finishPointShape()
     local build = self.polygon_build
     if not build then return false end
     local points = {}
@@ -560,25 +583,32 @@ function EditorMapView:finishPolygon()
             table.insert(points, { x = point.x, y = point.y })
         end
     end
-    if #points > 1 and pointsEqual(points[1], points[#points]) then table.remove(points) end
-    if #points < 3 then
-        self.editor:addWarning("A polygon requires at least three distinct points",
-            "Click additional points, then press Enter, double-click, or click the first point to finish.",
-            "shape_placement")
+    if build.shape == "polygon" and #points > 1 and pointsEqual(points[1], points[#points]) then
+        table.remove(points)
+    end
+    local minimum = build.shape == "polygon" and 3 or 2
+    if #points < minimum then
+        local instructions = build.shape == "polygon"
+            and "Click additional points, then press Enter, double-click, or click the first point to finish."
+            or "Click additional points, then press Enter or double-click to finish."
+        self.editor:addWarning("A " .. build.shape .. " requires at least " .. minimum .. " distinct points",
+            instructions, "shape_placement")
         return true
     end
-    local area = 0
-    for index, point in ipairs(points) do
-        local next_point = points[index % #points + 1]
-        area = area + point.x * next_point.y - next_point.x * point.y
-    end
-    if math.abs(area) < 0.001 then
-        self.editor:addWarning("A polygon needs a non-zero enclosed area", nil, "shape_placement")
-        return true
+    if build.shape == "polygon" then
+        local area = 0
+        for index, point in ipairs(points) do
+            local next_point = points[index % #points + 1]
+            area = area + point.x * next_point.y - next_point.x * point.y
+        end
+        if math.abs(area) < 0.001 then
+            self.editor:addWarning("A polygon needs a non-zero enclosed area", nil, "shape_placement")
+            return true
+        end
     end
     self.polygon_build = nil
     self.editor:clearDiagnostics("shape_placement")
-    local object, layer_or_reason, map_id = self.document:addPolygonObject(build.map_id, points)
+    local object, layer_or_reason, map_id = self.document:addPointShapeObject(build.shape, build.map_id, points)
     if not object then
         self.editor:cancelHistoryTransaction()
         self.editor:addWarning(layer_or_reason, nil, "shape_placement")
@@ -590,6 +620,10 @@ function EditorMapView:finishPolygon()
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
     return true
+end
+
+function EditorMapView:finishPolygon()
+    return self:finishPointShape()
 end
 
 function EditorMapView:cancelPolygon()
@@ -673,7 +707,8 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             local vertex_selection, vertex_index = self:getPolygonVertexAt(world_x, world_y)
             if vertex_selection then
                 self.polygon_vertex_drag = { selection = vertex_selection, index = vertex_index }
-                self.editor:beginHistoryTransaction("Move Polygon Vertex", self.document)
+                local shape = vertex_selection.data.polygon and "Polygon" or "Polyline"
+                self.editor:beginHistoryTransaction("Move " .. shape .. " Vertex", self.document)
                 return true
             end
         end
@@ -758,7 +793,7 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             end
             return self.editor:placeEvent(self, self.editor.placement_event_id, world_x, world_y)
         elseif tool == "shape" and self.editor.shape_mode ~= "point"
-            and self.editor.shape_mode ~= "polygon" then
+            and self.editor.shape_mode ~= "polygon" and self.editor.shape_mode ~= "polyline" then
             self.shape_drag = { shape = self.editor.shape_mode, start_x = world_x, start_y = world_y,
                 current_x = world_x, current_y = world_y }
             self.editor:beginHistoryTransaction("Create Shape", self.document)
@@ -782,31 +817,33 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             self.editor:markHistoryChanged()
             self.editor:commitHistoryTransaction()
             return true
-        elseif tool == "shape" and self.editor.shape_mode == "polygon" then
+        elseif tool == "shape" and (self.editor.shape_mode == "polygon"
+            or self.editor.shape_mode == "polyline") then
+            local shape = self.editor.shape_mode
             local build = self.polygon_build
             local entry = build and self.document.map_lookup[build.map_id]
                 or self.document:getMapAt(world_x, world_y) or self.document:getPrimaryMap()
             if not build then
                 if not self.document:getSelectedObjectLayer(entry.id) then
-                    self.editor:addWarning("Select an object layer before creating a polygon",
+                    self.editor:addWarning("Select an object layer before creating a " .. shape,
                         nil, "shape_placement")
                     return true
                 end
-                build = { map_id = entry.id, points = {} }
+                build = { shape = shape, map_id = entry.id, points = {} }
                 self.polygon_build = build
-                self.editor:beginHistoryTransaction("Create Polygon", self.document)
+                self.editor:beginHistoryTransaction("Create " .. StringUtils.titleCase(shape), self.document)
             end
-            if presses and presses >= 2 then return self:finishPolygon() end
-            world_x, world_y = self:snapToMapGrid(entry, world_x, world_y)
+            world_x, world_y = self:snapPointShapeToMapGrid(entry, world_x, world_y)
             local first = build.points[1]
             local close_distance = 9 / self.view_zoom
-            if #build.points >= 3 and first
+            if shape == "polygon" and #build.points >= 3 and first
                 and math.abs(world_x - first.x) <= close_distance
                 and math.abs(world_y - first.y) <= close_distance then
-                return self:finishPolygon()
+                return self:finishPointShape()
             end
             local point = { x = world_x, y = world_y }
             if not pointsEqual(build.points[#build.points], point) then table.insert(build.points, point) end
+            if presses and presses >= 2 then return self:finishPointShape() end
             return true
         elseif tool == "eraser" then
             self.editor:selectMapObject(selection)
@@ -877,14 +914,14 @@ function EditorMapView:onMouseMoved(x, y, dx, dy)
     if self.tile_stroke then return self:continueTileEdit(world_x, world_y) end
     if self.polygon_build then
         local entry = self.document.map_lookup[self.polygon_build.map_id]
-        if entry then world_x, world_y = self:snapToMapGrid(entry, world_x, world_y) end
+        if entry then world_x, world_y = self:snapPointShapeToMapGrid(entry, world_x, world_y) end
         self.polygon_build.current_x, self.polygon_build.current_y = world_x, world_y
         return true
     end
     if self.polygon_vertex_drag then
         local drag = self.polygon_vertex_drag
-        world_x, world_y = self:snapToMapGrid(drag.selection.entry, world_x, world_y)
-        if self.document:setPolygonWorldPoint(drag.selection, drag.index, world_x, world_y) then
+        world_x, world_y = self:snapPointShapeToMapGrid(drag.selection.entry, world_x, world_y)
+        if self.document:setPointShapeWorldPoint(drag.selection, drag.index, world_x, world_y) then
             self.editor:markHistoryChanged()
         end
         return true
@@ -1147,7 +1184,7 @@ function EditorMapView:onKeyPressed(key, is_repeat)
             if #self.polygon_build.points == 0 then return self:cancelPolygon() end
             return true
         end
-        if key == "return" or key == "kpenter" then return self:finishPolygon() end
+        if key == "return" or key == "kpenter" then return self:finishPointShape() end
     end
     return super.onKeyPressed(self, key, is_repeat)
 end

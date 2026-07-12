@@ -139,11 +139,11 @@
           "id": 82,
           "name": "",
           "type": "",
-          "x": 440,
-          "y": 240,
+          "x": 422.67949192431,
+          "y": 295.35898384862,
           "width": 40,
           "height": 80,
-          "rotation": 0,
+          "rotation": 330,
           "shape": {
             "type": "rectangle",
             "shape_data": {}
@@ -443,16 +443,28 @@
           "id": 90,
           "name": "chest",
           "type": "",
-          "x": 400,
-          "y": 250,
+          "x": 355.50510257217,
+          "y": 255.85786437627,
           "width": 40,
           "height": 40,
-          "rotation": 0,
+          "rotation": 345,
           "shape": {
             "type": "rectangle",
             "shape_data": {}
           },
           "visible": true,
+          "fx": [
+            {
+              "type": "outline",
+              "properties": [
+                {
+                  "name": "cutout",
+                  "type": "boolean",
+                  "value": true
+                }
+              ]
+            }
+          ],
           "properties": [
             {
               "name": "item",

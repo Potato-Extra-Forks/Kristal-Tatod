@@ -336,8 +336,10 @@ function operations.loadMarkers(self, layer)
     for _, v in ipairs(layer.objects) do
         v.width = v.width or 0
         v.height = v.height or 0
-        v.center_x = v.x + v.width / 2
-        v.center_y = v.y + v.height / 2
+        local rotation = math.rad(tonumber(v.rotation) or 0)
+        local half_width, half_height = v.width / 2, v.height / 2
+        v.center_x = v.x + half_width * math.cos(rotation) - half_height * math.sin(rotation)
+        v.center_y = v.y + half_width * math.sin(rotation) + half_height * math.cos(rotation)
 
         local marker = TableUtils.copy(v, true)
 
@@ -436,8 +438,10 @@ function operations.loadObjects(self, layer, depth, layer_type)
     for _, v in ipairs(layer.objects) do
         v.width = v.width or 0
         v.height = v.height or 0
-        v.center_x = v.x + v.width / 2
-        v.center_y = v.y + v.height / 2
+        local rotation = math.rad(tonumber(v.rotation) or 0)
+        local half_width, half_height = v.width / 2, v.height / 2
+        v.center_x = v.x + half_width * math.cos(rotation) - half_height * math.sin(rotation)
+        v.center_y = v.y + half_width * math.sin(rotation) + half_height * math.cos(rotation)
 
         -- Get width/height of the full polygon (usable when a polygon is not supported on an object)
         if v.polygon then
@@ -451,8 +455,9 @@ function operations.loadObjects(self, layer, depth, layer_type)
 
             v.width = max_x - min_x
             v.height = max_y - min_y
-            v.center_x = v.x - min_x + v.width / 2
-            v.center_y = v.y - min_y + v.height / 2
+            local center_x, center_y = (min_x + max_x) / 2, (min_y + max_y) / 2
+            v.center_x = v.x + center_x * math.cos(rotation) - center_y * math.sin(rotation)
+            v.center_y = v.y + center_x * math.sin(rotation) + center_y * math.cos(rotation)
         end
 
         if v.gid then
@@ -476,6 +481,7 @@ function operations.loadObjects(self, layer, depth, layer_type)
                     obj = self:loadObject(obj_type, v)
                 end
                 if obj then
+                    obj.rotation = rotation
                     obj.x = obj.x + (layer.offsetx or 0)
                     obj.y = obj.y + (layer.offsety or 0)
                     obj:setParallax((obj.parallax_x or 1) * layer.parallaxx, (obj.parallax_y or 1) * layer.parallaxy)

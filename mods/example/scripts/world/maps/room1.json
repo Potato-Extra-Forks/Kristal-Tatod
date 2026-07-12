@@ -855,7 +855,8 @@
                 "kind": "array",
                 "values": [
                   "* These [color:yellow]stairs[color:reset] are [color:yellow]Pissing[color:reset] me off...",
-                  "* I'm the original   [color:yellow]Starwalker[color:reset]"
+                  "* I'm the original   [color:yellow]Starwalker[color:reset]",
+                  ""
                 ]
               }
             }
@@ -1056,6 +1057,23 @@
           "center_x": 700,
           "center_y": 610,
           "opacity": 1
+        },
+        {
+          "id": 59,
+          "name": "chest",
+          "type": "chest",
+          "x": 120,
+          "y": 720,
+          "width": 40,
+          "height": 40,
+          "shape": {
+            "type": "rectangle",
+            "shape_data": {}
+          },
+          "visible": true,
+          "properties": [],
+          "center_x": 140,
+          "center_y": 740
         }
       ]
     }

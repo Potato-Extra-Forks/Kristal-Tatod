@@ -82,6 +82,9 @@ function EditorToolbar:drawSelf()
         if self.hovered_tool.id == "shape" then
             label = label .. ": " .. StringUtils.titleCase(self.editor.shape_mode)
         end
+        if self.hovered_tool.keybind then
+            label = label .. " (" .. Input.getText(self.hovered_tool.keybind, false) .. ")"
+        end
         love.graphics.print(label, self.tooltip_x or 8,
             math.floor((self.height - font:getHeight()) / 2))
     end

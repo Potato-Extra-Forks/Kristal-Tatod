@@ -34,6 +34,9 @@ function EditorTilesetPanel:init(editor)
         on_request_focus = function(control) editor.dockspace:setFocus(control) end
     }))
     self.properties = self:addChild(EditorPropertiesPanel(editor))
+    self.zoom_out_button = self:addChild(EditorButton("-", function() self.tile_grid:stepZoom(-1) end))
+    self.zoom_label_button = self:addChild(EditorButton("100%", function() self.tile_grid:resetZoom() end))
+    self.zoom_in_button = self:addChild(EditorButton("+", function() self.tile_grid:stepZoom(1) end))
 end
 
 function EditorTilesetPanel:setDocument(document)
@@ -133,7 +136,8 @@ function EditorTilesetPanel:getItemTarget(item)
     elseif self.mode == "collision" then
         title = "Tile Collision Shape"
         fields = { field("Shape", "shape"), field("X", "x", true), field("Y", "y", true),
-            field("Width", "width", true), field("Height", "height", true) }
+            field("Width", "width", true), field("Height", "height", true),
+            field("Rotation", "rotation", true) }
     elseif self.mode == "animation" then
         title = "Animation Frame"
         fields = { field("Tile ID", "tileid", true), field("Duration (ms)", "duration", true) }
@@ -188,20 +192,32 @@ function EditorTilesetPanel:update(dt)
         button.focused = self.mode == button.label:lower()
         x = x + button_width
     end
-    local content_y = 44
-    local atlas_width = MathUtils.clamp(math.floor(self.width * 0.44), 180, math.max(180, self.width - 220))
-    local right_x = atlas_width + 4
-    local right_width = math.max(0, self.width - right_x)
-    self.tile_grid:setBounds(4, content_y, math.max(0, atlas_width - 4), math.max(0, self.height - content_y - 4))
-    if self.list.visible then
-        local list_height = math.max(100, math.floor((self.height - content_y) * 0.38))
-        self.add_button:setBounds(right_x + 4, content_y, math.max(0, right_width - 12), 28)
-        self.list:setBounds(right_x + 4, content_y + 36,
-            math.max(0, right_width - 12), math.max(0, list_height - 36))
-        self.properties:setBounds(right_x, content_y + list_height,
-            right_width, math.max(0, self.height - content_y - list_height))
+    local toolbar_y = 42
+    self.zoom_out_button:setBounds(math.max(8, self.width - 148), toolbar_y, 36, 28)
+    self.zoom_label_button:setBounds(math.max(48, self.width - 108), toolbar_y, 64, 28)
+    self.zoom_in_button:setBounds(math.max(116, self.width - 40), toolbar_y, 36, 28)
+    self.zoom_label_button.label = string.format("%d%%", MathUtils.round(self.tile_grid.zoom * 100))
+
+    local atlas_y = 76
+    local available_height = math.max(0, self.height - atlas_y - 4)
+    local atlas_height = math.floor(available_height * 0.56)
+    if available_height >= 180 then
+        atlas_height = MathUtils.clamp(atlas_height, 100, available_height - 80)
     else
-        self.properties:setBounds(right_x, content_y, right_width, math.max(0, self.height - content_y))
+        atlas_height = available_height
+    end
+    self.tile_grid:setBounds(4, atlas_y, math.max(0, self.width - 8), atlas_height)
+    local details_y = atlas_y + atlas_height + 4
+    local details_height = math.max(0, self.height - details_y)
+    if self.list.visible then
+        local list_width = MathUtils.clamp(math.floor(self.width * 0.34), 150, math.max(150, self.width - 220))
+        self.add_button:setBounds(4, details_y + 4, math.max(0, list_width - 8), 28)
+        self.list:setBounds(4, details_y + 36,
+            math.max(0, list_width - 8), math.max(0, details_height - 40))
+        self.properties:setBounds(list_width, details_y,
+            math.max(0, self.width - list_width), details_height)
+    else
+        self.properties:setBounds(0, details_y, self.width, details_height)
     end
     super.update(self, dt)
 end
@@ -209,9 +225,18 @@ end
 function EditorTilesetPanel:drawSelf()
     Draw.setColor(0.08, 0.08, 0.09, 1)
     love.graphics.rectangle("fill", 0, 0, self.width, self.height)
+    Draw.setColor(0.78, 0.78, 0.82, 1)
+    love.graphics.setFont(EditorFont.get(16))
+    love.graphics.print("Tileset Atlas", 8, 48)
     Draw.setColor(0.30, 0.30, 0.34, 1)
-    local atlas_width = MathUtils.clamp(math.floor(self.width * 0.44), 180, math.max(180, self.width - 220))
-    love.graphics.line(atlas_width + 0.5, 44, atlas_width + 0.5, self.height)
+    love.graphics.line(0, 38.5, self.width, 38.5)
+    love.graphics.line(0, 73.5, self.width, 73.5)
+    love.graphics.line(0, self.tile_grid.y + self.tile_grid.height + 2.5,
+        self.width, self.tile_grid.y + self.tile_grid.height + 2.5)
+    if self.list.visible then
+        love.graphics.line(self.properties.x + 0.5, self.properties.y,
+            self.properties.x + 0.5, self.height)
+    end
 end
 
 return EditorTilesetPanel

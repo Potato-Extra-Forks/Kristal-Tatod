@@ -652,7 +652,7 @@ function Kristal.onKeyPressed(key, is_repeat)
     local console_open = Kristal.Console and Kristal.Console.is_open
 
     if not is_repeat and Input.shouldProcess(key) then
-        if Input.is("editor", key) and Kristal.getState() == Game
+        if not RELEASE_MODE and Input.is("editor", key) and Kristal.getState() == Game
             and Game.state == "OVERWORLD" and Game.world and Game.world.map then
             Input.clear("editor")
             Kristal.enterEditor({ map_id = Game.world.map.id, game_preview = true })
@@ -1230,6 +1230,7 @@ end
 ---@param options? {project_id?: string, map_id?: string, restore_active_document?: boolean, game_preview?: boolean}
 ---@return boolean success
 function Kristal.enterEditor(options)
+    if RELEASE_MODE then return false end
     if Kristal.getState() == Kristal.States["Editor"]
         or Kristal.getState() == Kristal.States["EditorTransition"] then return true end
     if Kristal.getState() ~= Game or not Mod then return false end
@@ -1255,6 +1256,7 @@ end
 ---@param id string
 ---@return boolean success
 function Kristal.loadModIntoEditor(id)
+    if RELEASE_MODE then return false end
     return Kristal.loadMod(id, nil, nil, function()
         if Kristal.preInitMod(id) then
             Kristal.setDesiredWindowTitleAndIcon()
@@ -1264,7 +1266,8 @@ function Kristal.loadModIntoEditor(id)
                 project_id = id,
                 transition = false,
                 restore_active_document = true,
-                game_preview = false
+                game_preview = false,
+                return_to_menu = true
             })
         end
     end)

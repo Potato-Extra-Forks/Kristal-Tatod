@@ -35,21 +35,21 @@ function MainMenuTitle:onEnter(old_state)
     if TARGET_MOD then
         self.options = {
             { "play", self.has_target_saves and "Load game" or "Start game" },
-            { "editor", "Editor" },
-            { "options", "Options" },
-            { "credits", "Credits" },
-            { "quit", "Quit" },
         }
+        if not RELEASE_MODE then table.insert(self.options, { "editor", "Editor" }) end
+        table.insert(self.options, { "options", "Options" })
+        table.insert(self.options, { "credits", "Credits" })
+        table.insert(self.options, { "quit", "Quit" })
     else
         self.options = {
             { "play", "Play" },
-            { "editor", "Editor" },
-            { "modfolder", "Open folder" },
-            { "options", "Options" },
-            { "credits", "Credits" },
-            { "wiki", "Open wiki" },
-            { "quit", "Quit" },
         }
+        if not RELEASE_MODE then table.insert(self.options, { "editor", "Editor" }) end
+        table.insert(self.options, { "modfolder", "Open folder" })
+        table.insert(self.options, { "options", "Options" })
+        table.insert(self.options, { "credits", "Credits" })
+        table.insert(self.options, { "wiki", "Open wiki" })
+        table.insert(self.options, { "quit", "Quit" })
     end
 
     if not TARGET_MOD then
@@ -88,7 +88,7 @@ function MainMenuTitle:onKeyPressed(key, is_repeat)
                 end
             end
 
-        elseif option == "editor" then
+        elseif option == "editor" and not RELEASE_MODE then
             if TARGET_MOD then
                 if not Kristal.loadModIntoEditor(TARGET_MOD) then
                     error("Failed to load mod for editor: " .. TARGET_MOD)

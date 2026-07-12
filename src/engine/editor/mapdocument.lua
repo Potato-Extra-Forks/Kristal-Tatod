@@ -641,38 +641,56 @@ function EditorMapDocument:addShapeObject(shape, map_id, world_x, world_y, width
     return object, layer, map_id
 end
 
-function EditorMapDocument:addPolygonObject(map_id, points)
-    if not points or #points < 3 then return nil, "A polygon requires at least three points" end
+function EditorMapDocument:addPointShapeObject(shape, map_id, points)
+    local minimum = shape == "polygon" and 3 or 2
+    if shape ~= "polygon" and shape ~= "polyline" then return nil, "Unsupported point shape" end
+    if not points or #points < minimum then
+        return nil, "A " .. shape .. " requires at least " .. minimum .. " points"
+    end
     local positioned_entry = self:getMapAt(points[1].x, points[1].y)
     map_id = map_id or (positioned_entry and positioned_entry.id) or self.primary_map_id
     local entry = self.map_lookup[map_id]
     local layer = self:getSelectedObjectLayer(map_id)
-    if not entry or not layer then return nil, "Select an object layer before creating a polygon" end
+    if not entry or not layer then return nil, "Select an object layer before creating a " .. shape end
     local min_x, min_y, max_x, max_y = points[1].x, points[1].y, points[1].x, points[1].y
     for _, point in ipairs(points) do
         min_x, min_y = math.min(min_x, point.x), math.min(min_y, point.y)
         max_x, max_y = math.max(max_x, point.x), math.max(max_y, point.y)
     end
     local object = {
-        name = "polygon",
-        shape = "polygon",
+        name = shape,
+        shape = shape,
         x = min_x - entry.x - (layer.offsetx or 0),
         y = min_y - entry.y - (layer.offsety or 0),
         width = max_x - min_x,
         height = max_y - min_y,
-        polygon = {},
         visible = true,
         properties = {},
         __editor_property_types = {}
     }
+    object[shape] = {}
     for _, point in ipairs(points) do
-        table.insert(object.polygon, { x = point.x - min_x, y = point.y - min_y })
+        table.insert(object[shape], { x = point.x - min_x, y = point.y - min_y })
+    end
+    if shape == "polyline" then
+        object.shape_data = { edges = {} }
+        for index = 1, #points - 1 do
+            table.insert(object.shape_data.edges, { index, index + 1 })
+        end
     end
     self:getObjectId(object)
     layer.objects = layer.objects or {}
     table.insert(layer.objects, object)
     self:invalidatePreview(map_id)
     return object, layer, map_id
+end
+
+function EditorMapDocument:addPolygonObject(map_id, points)
+    return self:addPointShapeObject("polygon", map_id, points)
+end
+
+function EditorMapDocument:addPolylineObject(map_id, points)
+    return self:addPointShapeObject("polyline", map_id, points)
 end
 
 function EditorMapDocument:removeEditorObject(selection)
@@ -714,14 +732,20 @@ function EditorMapDocument:getObjectShape(selection)
     local data = selection and selection.data or {}
     if data.shape == "point" or data.point == true then return "point" end
     if data.polygon then return "polygon" end
-    if data.polyline then return "line" end
+    if data.polyline then return data.shape == "polyline" and "polyline" or "line" end
     if data.shape == "ellipse" or data.ellipse == true then return "ellipse" end
     return "rectangle"
 end
 
-function EditorMapDocument:getPolygonWorldPoint(selection, index)
-    local point = selection and selection.data and selection.data.polygon
-        and selection.data.polygon[index]
+function EditorMapDocument:getPointShape(selection)
+    local data = selection and selection.data
+    if not data then return nil end
+    return data.polygon or data.shape == "polyline" and data.polyline
+end
+
+function EditorMapDocument:getPointShapeWorldPoint(selection, index)
+    local points = self:getPointShape(selection)
+    local point = points and points[index]
     if not point then return nil end
     local origin_x, origin_y = self:getObjectWorldPosition(selection)
     local rotation = math.rad(selection.data.rotation or 0)
@@ -730,9 +754,9 @@ function EditorMapDocument:getPolygonWorldPoint(selection, index)
         origin_y + x * math.sin(rotation) + y * math.cos(rotation)
 end
 
-function EditorMapDocument:normalizePolygon(selection)
+function EditorMapDocument:normalizePointShape(selection)
     local data = selection and selection.data
-    local points = data and data.polygon
+    local points = self:getPointShape(selection)
     if not points or #points == 0 then return false end
     local min_x, min_y, max_x, max_y
     for _, point in ipairs(points) do
@@ -755,49 +779,114 @@ function EditorMapDocument:normalizePolygon(selection)
     return true
 end
 
-function EditorMapDocument:setPolygonWorldPoint(selection, index, world_x, world_y)
-    if not selection or selection.document ~= self or not selection.data.polygon
-        or not selection.data.polygon[index] then return false end
+function EditorMapDocument:setPointShapeWorldPoint(selection, index, world_x, world_y)
+    local points = self:getPointShape(selection)
+    if not selection or selection.document ~= self or not points or not points[index] then return false end
     local origin_x, origin_y = self:getObjectWorldPosition(selection)
     local rotation = -math.rad(selection.data.rotation or 0)
     local dx, dy = world_x - origin_x, world_y - origin_y
-    local point = selection.data.polygon[index]
+    local point = points[index]
     point.x = dx * math.cos(rotation) - dy * math.sin(rotation)
     point.y = dx * math.sin(rotation) + dy * math.cos(rotation)
     point[1], point[2] = nil, nil
-    self:normalizePolygon(selection)
+    self:normalizePointShape(selection)
     self:invalidatePreview(selection.map_id)
     return true
 end
 
-function EditorMapDocument:insertPolygonWorldPoint(selection, after_index, world_x, world_y)
-    if not selection or selection.document ~= self or not selection.data.polygon
-        or not selection.data.polygon[after_index] then return false end
+function EditorMapDocument:insertPointShapeWorldPoint(selection, after_index, world_x, world_y)
+    local points = self:getPointShape(selection)
+    if not selection or selection.document ~= self or not points or not points[after_index] then return false end
     local origin_x, origin_y = self:getObjectWorldPosition(selection)
     local rotation = -math.rad(selection.data.rotation or 0)
     local dx, dy = world_x - origin_x, world_y - origin_y
-    table.insert(selection.data.polygon, after_index + 1, {
+    local edges = selection.data.shape_data and selection.data.shape_data.edges
+    if selection.data.polyline and type(edges) == "table" then
+        local remapped = {}
+        for _, edge in ipairs(edges) do
+            local first, second = tonumber(edge.from or edge[1]), tonumber(edge.to or edge[2])
+            if first and second then
+                if first == after_index and second == after_index + 1 then
+                    table.insert(remapped, { after_index, after_index + 1 })
+                    table.insert(remapped, { after_index + 1, after_index + 2 })
+                elseif first == after_index + 1 and second == after_index then
+                    table.insert(remapped, { after_index + 2, after_index + 1 })
+                    table.insert(remapped, { after_index + 1, after_index })
+                else
+                    table.insert(remapped, {
+                        first > after_index and first + 1 or first,
+                        second > after_index and second + 1 or second
+                    })
+                end
+            end
+        end
+        selection.data.shape_data.edges = remapped
+    end
+    table.insert(points, after_index + 1, {
         x = dx * math.cos(rotation) - dy * math.sin(rotation),
         y = dx * math.sin(rotation) + dy * math.cos(rotation)
     })
-    self:normalizePolygon(selection)
+    self:normalizePointShape(selection)
     self:invalidatePreview(selection.map_id)
     return after_index + 1
 end
 
-function EditorMapDocument:removePolygonPoint(selection, index)
-    if not selection or selection.document ~= self or not selection.data.polygon
-        or #selection.data.polygon <= 3 or not selection.data.polygon[index] then return false end
-    table.remove(selection.data.polygon, index)
-    self:normalizePolygon(selection)
+function EditorMapDocument:removePointShapePoint(selection, index)
+    local points = self:getPointShape(selection)
+    local minimum = selection and selection.data and selection.data.polygon and 3 or 2
+    if not selection or selection.document ~= self or not points
+        or #points <= minimum or not points[index] then return false end
+    local edges = selection.data.shape_data and selection.data.shape_data.edges
+    if selection.data.polyline and type(edges) == "table" then
+        local remapped, neighbors = {}, {}
+        for _, edge in ipairs(edges) do
+            local first, second = tonumber(edge.from or edge[1]), tonumber(edge.to or edge[2])
+            if first == index or second == index then
+                table.insert(neighbors, first == index and second or first)
+            elseif first and second then
+                table.insert(remapped, {
+                    first > index and first - 1 or first,
+                    second > index and second - 1 or second
+                })
+            end
+        end
+        if #neighbors == 2 then
+            local first = neighbors[1] > index and neighbors[1] - 1 or neighbors[1]
+            local second = neighbors[2] > index and neighbors[2] - 1 or neighbors[2]
+            if first ~= second then table.insert(remapped, { first, second }) end
+        end
+        selection.data.shape_data.edges = remapped
+    end
+    table.remove(points, index)
+    self:normalizePointShape(selection)
     self:invalidatePreview(selection.map_id)
     return true
+end
+
+function EditorMapDocument:getPolygonWorldPoint(selection, index)
+    return self:getPointShapeWorldPoint(selection, index)
+end
+
+function EditorMapDocument:normalizePolygon(selection)
+    return self:normalizePointShape(selection)
+end
+
+function EditorMapDocument:setPolygonWorldPoint(selection, index, world_x, world_y)
+    return self:setPointShapeWorldPoint(selection, index, world_x, world_y)
+end
+
+function EditorMapDocument:insertPolygonWorldPoint(selection, after_index, world_x, world_y)
+    return self:insertPointShapeWorldPoint(selection, after_index, world_x, world_y)
+end
+
+function EditorMapDocument:removePolygonPoint(selection, index)
+    return self:removePointShapePoint(selection, index)
 end
 
 function EditorMapDocument:setObjectShape(selection, shape)
     if not selection or selection.document ~= self then return false end
     if shape ~= "point" and shape ~= "rectangle" and shape ~= "ellipse"
-        and shape ~= "line" and shape ~= "polygon" then return false end
+        and shape ~= "line" and shape ~= "polygon" and shape ~= "polyline" then return false end
     local data = selection.data
     local previous_shape = self:getObjectShape(selection)
     if previous_shape == shape and data.shape == shape then return false end
@@ -805,6 +894,7 @@ function EditorMapDocument:setObjectShape(selection, shape)
     local tile_height = selection.entry and selection.entry.tile_height or 40
     local previous_width, previous_height = data.width or 0, data.height or 0
     local rotation = math.rad(data.rotation or 0)
+    if previous_shape ~= shape then data.shape_data = {} end
     if shape == "point" and previous_shape ~= "point" then
         data.x = (data.x or 0) + previous_width / 2 * math.cos(rotation)
             - previous_height / 2 * math.sin(rotation)
@@ -825,9 +915,18 @@ function EditorMapDocument:setObjectShape(selection, shape)
             data.y = (data.y or 0) - data.width / 2 * math.sin(rotation)
                 - data.height / 2 * math.cos(rotation)
         end
-        if shape == "line" then
-            if previous_shape ~= "line" or not data.polyline then
+        if shape == "line" or shape == "polyline" then
+            if not data.polyline then
                 data.polyline = { { x = 0, y = 0 }, { x = data.width, y = data.height } }
+            end
+            if shape == "line" and #data.polyline > 2 then
+                data.polyline = { data.polyline[1], data.polyline[#data.polyline] }
+            end
+            if shape == "polyline" then
+                data.shape_data.edges = {}
+                for index = 1, #data.polyline - 1 do
+                    table.insert(data.shape_data.edges, { index, index + 1 })
+                end
             end
             data.polygon = nil
         elseif shape == "polygon" then
@@ -867,6 +966,26 @@ function EditorMapDocument:findObjectAt(world_x, world_y)
                     local hit = width == 0 and height == 0
                         and math.abs(local_x) <= 10 and math.abs(local_y) <= 10
                         or local_x >= 0 and local_y >= 0 and local_x <= width and local_y <= height
+                    if object.polyline and #object.polyline >= 2 then
+                        hit = false
+                        local thickness = object.shape_data and tonumber(object.shape_data.thickness) or 0
+                        local tolerance = math.max(10, thickness / 2 + 4)
+                        for _, edge in ipairs(TiledUtils.getPolylineEdges(object, #object.polyline)) do
+                            local first, second = object.polyline[edge[1]], object.polyline[edge[2]]
+                            local x1, y1 = first.x or first[1] or 0, first.y or first[2] or 0
+                            local x2, y2 = second.x or second[1] or 0, second.y or second[2] or 0
+                            local vx, vy = x2 - x1, y2 - y1
+                            local length_squared = vx * vx + vy * vy
+                            local amount = length_squared == 0 and 0
+                                or math.max(0, math.min(1, ((local_x - x1) * vx + (local_y - y1) * vy) / length_squared))
+                            local nearest_x, nearest_y = x1 + vx * amount, y1 + vy * amount
+                            local distance_x, distance_y = local_x - nearest_x, local_y - nearest_y
+                            if distance_x * distance_x + distance_y * distance_y <= tolerance * tolerance then
+                                hit = true
+                                break
+                            end
+                        end
+                    end
                     if hit then return self:getObjectSelection(entry.id, layer, object) end
                 end
             end

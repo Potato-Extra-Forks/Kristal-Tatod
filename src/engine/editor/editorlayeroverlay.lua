@@ -38,11 +38,17 @@ function EditorLayerOverlay:drawObject(object, alpha)
     love.graphics.translate((object.x or 0) + (self.source_layer.offsetx or 0),
         (object.y or 0) + (self.source_layer.offsety or 0))
     love.graphics.rotate(math.rad(object.rotation or 0))
+    local previous_width = love.graphics.getLineWidth()
+    if object.polyline and object.shape_data and tonumber(object.shape_data.thickness) then
+        love.graphics.setLineWidth(math.max(1, tonumber(object.shape_data.thickness)))
+    end
 
     local color = self.color
     Draw.setColor(color[1] or 1, color[2] or 1, color[3] or 1, 0.14 * alpha)
-    if points and #points >= 3 and object.polygon then
-        love.graphics.polygon("fill", collectPoints(points))
+    if points then
+        if #points >= 3 and object.polygon then
+            love.graphics.polygon("fill", collectPoints(points))
+        end
     elseif object.shape == "ellipse" and width > 0 and height > 0 then
         love.graphics.ellipse("fill", width / 2, height / 2, width / 2, height / 2)
     elseif width > 0 or height > 0 then
@@ -56,7 +62,12 @@ function EditorLayerOverlay:drawObject(object, alpha)
         if object.polygon and #coordinates >= 6 then
             love.graphics.polygon("line", coordinates)
         elseif #coordinates >= 4 then
-            love.graphics.line(coordinates)
+            for _, edge in ipairs(TiledUtils.getPolylineEdges(object, #points)) do
+                local first, second = points[edge[1]], points[edge[2]]
+                local x1, y1 = pointCoordinates(first)
+                local x2, y2 = pointCoordinates(second)
+                love.graphics.line(x1, y1, x2, y2)
+            end
         end
     elseif object.shape == "ellipse" and width > 0 and height > 0 then
         love.graphics.ellipse("line", width / 2, height / 2, width / 2, height / 2)
@@ -66,6 +77,7 @@ function EditorLayerOverlay:drawObject(object, alpha)
         love.graphics.line(-4, 0, 4, 0)
         love.graphics.line(0, -4, 0, 4)
     end
+    love.graphics.setLineWidth(previous_width)
     love.graphics.pop()
 end
 

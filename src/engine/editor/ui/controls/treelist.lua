@@ -389,7 +389,7 @@ function EditorTreeList:onMousePressed(x, y, button, presses)
     end
     if node.right_icon and node.right_action then
         local texture = Assets.getTexture(node.right_icon)
-        local icon_width = texture and texture:getWidth() or self.row_height
+        local icon_width = texture and (texture:getWidth()*2) or self.row_height
         local icon_right = self.width - self.scrollbar.width - 6
         if x >= icon_right - icon_width and x <= icon_right then
             node.right_action(node, self)
@@ -546,10 +546,10 @@ function EditorTreeList:drawSelf()
         if node.right_icon then
             local texture = Assets.getTexture(node.right_icon)
             if texture then
-                local icon_x = self.width - self.scrollbar.width - texture:getWidth() - 6
-                local icon_y = math.floor(y + (self.row_height - texture:getHeight()) / 2)
+                local icon_x = self.width - self.scrollbar.width - texture:getWidth()*2 - 6
+                local icon_y = math.floor(y + (self.row_height - texture:getHeight()*2) / 2)
                 Draw.setColor(node.right_color or { 0.82, 0.82, 0.85, 1 })
-                Draw.draw(texture, icon_x, icon_y)
+                Draw.draw(texture, icon_x, icon_y, 0, 2, 2)
             end
         end
     end

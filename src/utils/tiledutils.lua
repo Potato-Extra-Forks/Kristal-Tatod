@@ -218,43 +218,95 @@ function TiledUtils.colliderFromShape(parent, data, x, y, properties)
         inside = properties["inside"] or properties["outside"] or false
     }
 
+    local rotation = math.rad((tonumber(data.rotation) or 0) % 360)
+    local cosine, sine = math.cos(rotation), math.sin(rotation)
+    local width, height = data.width or 0, data.height or 0
+    local function transformPoint(point_x, point_y)
+        return x + point_x * cosine - point_y * sine,
+            y + point_x * sine + point_y * cosine
+    end
+    local function polygonCollider(points)
+        local transformed = {}
+        for _, point in ipairs(points) do
+            local point_x, point_y = transformPoint(point.x or point[1] or 0, point.y or point[2] or 0)
+            table.insert(transformed, { point_x, point_y })
+        end
+        return PolygonCollider(parent, transformed, mode)
+    end
+
     local current_hitbox
     if data.shape == "rectangle" then
-        -- For rectangles, create a Hitbox using the rectangle's dimensions
-        current_hitbox = Hitbox(parent, x, y, data.width, data.height, mode)
+        if rotation == 0 then
+            current_hitbox = Hitbox(parent, x, y, width, height, mode)
+        else
+            current_hitbox = polygonCollider({
+                { x = 0, y = 0 }, { x = width, y = 0 },
+                { x = width, y = height }, { x = 0, y = height }
+            })
+        end
 
-    elseif data.shape == "polyline" then
+    elseif data.shape == "polyline" or data.shape == "line" then
         -- For polylines, create a ColliderGroup using a series of LineColliders
         local line_colliders = {}
+        local points = data.polyline or data.shape_data and data.shape_data.points or {}
 
-        -- Loop through each pair of points in the polyline
-        for i = 1, #data.polyline - 1 do
-            local j = i + 1
+        for _, edge in ipairs(TiledUtils.getPolylineEdges(data, #points)) do
+            local i, j = edge[1], edge[2]
             -- Create a LineCollider using the current and next point of the polyline
-            local x1, y1 = x + data.polyline[i].x, y + data.polyline[i].y
-            local x2, y2 = x + data.polyline[j].x, y + data.polyline[j].y
+            local x1, y1 = transformPoint(points[i].x or points[i][1] or 0,
+                points[i].y or points[i][2] or 0)
+            local x2, y2 = transformPoint(points[j].x or points[j][1] or 0,
+                points[j].y or points[j][2] or 0)
             table.insert(line_colliders, LineCollider(parent, x1, y1, x2, y2, mode))
         end
 
         current_hitbox = ColliderGroup(parent, line_colliders)
 
     elseif data.shape == "polygon" then
-        -- For polygons, create a PolygonCollider using the polygon's points
+        current_hitbox = polygonCollider(data.polygon
+            or data.shape_data and data.shape_data.points or {})
+    elseif data.shape == "ellipse" then
         local points = {}
-
-        for i = 1, #data.polygon do
-            -- Convert points from the format {[x] = x, [y] = y} to {x, y}
-            table.insert(points, { x + data.polygon[i].x, y + data.polygon[i].y })
+        local radius_x, radius_y = width / 2, height / 2
+        for index = 0, 23 do
+            local angle = index / 24 * math.pi * 2
+            table.insert(points, {
+                x = radius_x + math.cos(angle) * radius_x,
+                y = radius_y + math.sin(angle) * radius_y
+            })
         end
-
-        current_hitbox = PolygonCollider(parent, points, mode)
+        current_hitbox = polygonCollider(points)
+    elseif data.shape == "point" or data.point == true then
+        current_hitbox = PointCollider(parent, x, y, mode)
     end
 
-    if properties["enabled"] == false then
+    if current_hitbox and properties["enabled"] == false then
         current_hitbox.collidable = false
     end
 
     return current_hitbox
+end
+
+--- Resolves explicit polyline point-index connections, falling back to a
+--- conventional consecutive path when no topology is stored.
+function TiledUtils.getPolylineEdges(data, point_count)
+    local shape_data = data and data.shape_data or data or {}
+    local source = shape_data.edges
+    local result = {}
+    for _, edge in ipairs(type(source) == "table" and source or {}) do
+        local first = tonumber(edge.from or edge[1])
+        local second = tonumber(edge.to or edge[2])
+        if first and second and first >= 1 and second >= 1
+            and first <= point_count and second <= point_count and first ~= second then
+            table.insert(result, { first, second })
+        end
+    end
+    if source == nil then
+        for index = 1, math.max(0, point_count - 1) do
+            table.insert(result, { index, index + 1 })
+        end
+    end
+    return result
 end
 
 ---@alias TiledUtils.PathFailReason

@@ -268,6 +268,13 @@ EditorFormat.SHAPE_DATA_TYPES = {
         "y",
         "points",
         "rotation"
+    },
+    polyline = {
+        "x",
+        "y",
+        "points",
+        "edges",
+        "thickness"
     }
 }
 
@@ -329,6 +336,9 @@ local function getChildSchema(schema, key, value)
     end
     if key == "shape" then return "shape" end
     if key == "shape_data" then return "shape_data:" .. tostring(schema == "shape" and value.type or "") end
+    if schema == "shape_data:polyline" and key == "edges" then
+        return "array:compact_array:2"
+    end
     if key == "transform_rules" then return "transform_rules" end
 end
 
@@ -474,10 +484,20 @@ end
 local function encodeShape(object)
     if type(object.shape) == "table" then return copySerializable(object.shape) end
     local shape_type = object.shape or (object.point and "point") or (object.ellipse and "ellipse")
-        or (object.polygon and "polygon") or (object.polyline and "line") or "rectangle"
+        or (object.polygon and "polygon") or (object.polyline and "polyline") or "rectangle"
     local shape_data = copySerializable(object.shape_data or {})
-    if shape_type == "polygon" and shape_data.points == nil then shape_data.points = copySerializable(object.polygon or {}) end
-    if shape_type == "line" and shape_data.points == nil then shape_data.points = copySerializable(object.polyline or {}) end
+    if shape_type == "polygon" and object.polygon then
+        shape_data.points = copySerializable(object.polygon)
+    end
+    if (shape_type == "line" or shape_type == "polyline") and object.polyline then
+        shape_data.points = copySerializable(object.polyline or {})
+    end
+    if shape_type == "polyline" and shape_data.edges == nil then
+        shape_data.edges = {}
+        for index = 1, #(shape_data.points or {}) - 1 do
+            table.insert(shape_data.edges, { index, index + 1 })
+        end
+    end
     return { type = shape_type, shape_data = shape_data }
 end
 
@@ -488,7 +508,9 @@ decodeObject = function(object, context)
     local shape, shape_data = decodeShape(object.shape)
     object.shape, object.shape_data = shape, shape_data
     if shape == "polygon" then object.polygon = copySerializable(shape_data.points or {}) end
-    if shape == "line" then object.polyline = copySerializable(shape_data.points or {}) end
+    if shape == "line" or shape == "polyline" then
+        object.polyline = copySerializable(shape_data.points or {})
+    end
     local success, reason = decodeOwnerProperties(object, context)
     if not success then return nil, reason end
     for _, fx in ipairs(object.fx or {}) do
