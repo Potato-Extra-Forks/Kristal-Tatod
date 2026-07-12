@@ -127,10 +127,15 @@ function EditorTilesetPanel:getItemTarget(item)
     local fields, title = {}, "Tileset Item"
     if self.mode == "terrain" then
         title = item.name or "Terrain Set"
-        fields = { field("Name", "name"), field("Type", "type") }
+        fields = { field("Name", "name"),
+            EditorPropertyFields.choice(item, "Type", "type", { "corner", "edge", "mixed" },
+                { default = "mixed" }) }
     elseif self.mode == "collision" then
         title = "Tile Collision Shape"
-        fields = { field("Shape", "shape"), field("X", "x", true), field("Y", "y", true),
+        fields = { EditorPropertyFields.choice(item, "Shape", "shape",
+                { "point", "line", "rectangle", "ellipse", "polygon", "polyline" },
+                { default = "rectangle" }),
+            field("X", "x", true), field("Y", "y", true),
             field("Width", "width", true), field("Height", "height", true),
             field("Rotation", "rotation", true) }
     elseif self.mode == "animation" then

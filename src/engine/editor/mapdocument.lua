@@ -76,6 +76,11 @@ function EditorMapDocument:captureHistoryState()
     end
     return {
         world_id = self.world.id,
+        world_name = self.world.name,
+        world_data = TableUtils.copy(self.world.data or {}, true),
+        world_properties = TableUtils.copy(self.world.properties or {}, true),
+        world_property_types = TableUtils.copy(self.world.__editor_property_types or {}, true),
+        world_virtual = self.world.virtual,
         primary_map_id = self.primary_map_id,
         maps = maps,
         editable_layers = layers,
@@ -88,6 +93,11 @@ end
 function EditorMapDocument:restoreHistoryState(state)
     if not state then return false end
     local world = EditorWorld(state.world_id)
+    world.name = state.world_name or state.world_id
+    world.data = TableUtils.copy(state.world_data or {}, true)
+    world.properties = TableUtils.copy(state.world_properties or {}, true)
+    world.__editor_property_types = TableUtils.copy(state.world_property_types or {}, true)
+    world.virtual = state.world_virtual
     for _, saved in ipairs(state.maps or {}) do
         local entry = world:addMap(saved.id, saved.x, saved.y, {
             explicit_companion = saved.explicit_companion
@@ -1147,7 +1157,7 @@ function EditorMapDocument:createPreview(entry)
         local layer_depth = layer._editor_depth_override or depth
         map.layers[layer.name] = layer_depth
         if layer._editor_kind_id == "group" then
-            -- Structural only; descendants retain their own drawable depth.
+            -- no-op
         elseif layer.type == "tilelayer" then
             map:loadTiles(layer, layer_depth)
             local drawable = map.tile_layers[#map.tile_layers]

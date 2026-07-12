@@ -3,12 +3,18 @@ local EditorChaserEnemy, super = Class(EditorEvent)
 EditorChaserEnemy.getEditorSprite = EditorNPC.getEditorSprite
 function EditorChaserEnemy:init(data, options)
     super.init(self, data, options)
-    self:registerProperty("actor", "string")
+    self:registerProperty("actor", "chooser", {
+        choices = Registry.editor_properties:registryChoices("actors")
+    })
     self:registerProperty("sprite", "string")
     self:registerProperty("animation", "string")
     self:registerProperty("facing", "choice", { choices = { "up", "down", "left", "right" } })
-    self:registerProperty("encounter", "string")
-    self:registerProperty("enemy", "string")
+    self:registerProperty("encounter", "chooser", {
+        choices = Registry.editor_properties:registryChoices("encounters", { optional = true })
+    })
+    self:registerProperty("enemy", "chooser", {
+        choices = Registry.editor_properties:registryChoices("enemies", { optional = true })
+    })
     self:registerProperty("group", "string")
     self:registerProperty("path", "string")
     self:registerProperty("speed", "number", { default = 6 })

@@ -5,7 +5,6 @@ local EditorEvent = Class()
 
 -- Event classes may override this with "point" when their position has no
 -- bounded area, or "region" when placement should be defined by dragging.
--- New rectangle event placements otherwise occupy one map-grid cell.
 EditorEvent.placement_shape = "rectangle"
 
 function EditorEvent:registerProperty(id, property_type, options)
@@ -16,8 +15,6 @@ function EditorEvent:registerPropertyGroup(id, options)
     return self.property_set:registerGroup(id, options)
 end
 
---- Editor events are deliberately plain classes. They are rendered directly
---- by map previews and never receive a parent, stage, World, or Game instance.
 function EditorEvent:init(data, options)
     data = data or {}
     options = options or {}

@@ -51,8 +51,9 @@ end
 
 function EditorFormatDiscovery.registerWorlds(registry)
     discover(EditorFormat.WORLD_DIRECTORY, EditorFormat.WORLD_EXTENSION, EditorFormat.decodeWorld,
-        function(data, relative)
+        function(data, relative, path)
             data.id = data.id or relative
+            data.full_path = path
             local world = EditorWorld(data.id)
             world.name = data.name or data.id
             world.data = data

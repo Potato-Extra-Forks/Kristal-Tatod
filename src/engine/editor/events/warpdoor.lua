@@ -14,7 +14,9 @@ function EditorWarpDoor:init(data, options)
         indexed = true,
         primary = "map"
     })
-    destinations:registerProperty("map", "string")
+    destinations:registerProperty("map", "chooser", {
+        choices = Registry.editor_properties:registryChoices({ "maps", "map_data" })
+    })
     destinations:registerProperty("name", "string")
     destinations:registerProperty("marker", "string")
     destinations:registerProperty("flag", "string")

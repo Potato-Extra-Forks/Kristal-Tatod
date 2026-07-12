@@ -133,7 +133,6 @@ local function isObjectReference(value)
 end
 
 ---Encodes arbitrary values used by the `value` and `table` property types.
----Type wrappers are only introduced for values JSON cannot represent faithfully.
 function EditorPropertyRegistry:encodeDynamic(value, context, seen)
     local value_type = type(value)
     if value_type == "nil" or value_type == "boolean" or value_type == "number" or value_type == "string" then
@@ -157,8 +156,6 @@ function EditorPropertyRegistry:decodeDynamic(value, context)
     if value.type == "function" or value.type == "object_reference" or value.type == "table" then
         return self:decode(value.type, value.value, nil, context)
     end
-    -- Unknown tagged values are retained so a temporarily missing plugin does
-    -- not destroy data it may understand next time it is loaded.
     return TableUtils.copy(value, true)
 end
 
@@ -207,7 +204,6 @@ function EditorPropertyRegistry:decodeTable(value, context)
             result[key] = decoded
         end
     else
-        -- Accept plain JSON tables for hand-authored files and early format drafts.
         return TableUtils.copy(value, true)
     end
     return result
@@ -322,6 +318,29 @@ function EditorPropertyRegistry:getChoices(definition)
         return success and type(result) == "table" and result or {}
     end
     return type(choices) == "table" and choices or {}
+end
+
+function EditorPropertyRegistry:registryChoices(registry_key, options)
+    options = options or {}
+    return function()
+        local choices, seen = {}, {}
+        if options.optional then table.insert(choices, { value = "", label = "None" }) end
+        local keys = type(registry_key) == "table" and registry_key or { registry_key }
+        for _, key in ipairs(keys) do
+            for id in pairs(Registry[key] or {}) do
+                if not seen[id] then
+                    seen[id] = true
+                    table.insert(choices, id)
+                end
+            end
+        end
+        table.sort(choices, function(a, b)
+            local a_value = type(a) == "table" and (a.value or a.id or "") or a
+            local b_value = type(b) == "table" and (b.value or b.id or "") or b
+            return tostring(a_value):lower() < tostring(b_value):lower()
+        end)
+        return choices
+    end
 end
 
 function EditorPropertyRegistry:coerce(type_id, value, definition)

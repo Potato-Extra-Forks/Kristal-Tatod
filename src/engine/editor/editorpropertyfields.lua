@@ -38,4 +38,10 @@ function EditorPropertyFields.number(target, label, key, options)
     return EditorPropertyFields.value(target, label, key, options)
 end
 
+function EditorPropertyFields.choice(target, label, key, choices, options)
+    local field = EditorPropertyFields.value(target, label, key, options)
+    field.choices = choices
+    return field
+end
+
 return EditorPropertyFields

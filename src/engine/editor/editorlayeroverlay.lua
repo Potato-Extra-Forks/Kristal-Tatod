@@ -2,18 +2,13 @@
 ---@overload fun(layer: table, layer_type?: table, depth?: number): EditorLayerOverlay
 local EditorLayerOverlay = Class()
 
---- Lightweight, stage-independent rendering for editor-only object layers.
---- Runtime collision, path, marker, and controller objects must not be created
---- just to make their source geometry visible in the map editor.
+--- Stage-independent rendering for editor-only object layers.
 function EditorLayerOverlay:init(layer, layer_type, depth)
     self.source_layer = layer
     self.layer_uid = layer._editor_uid
     self.layer = depth or 0
     self.layer_type = layer_type
     self.color = Registry.layer_types:getLayerColor(layer, layer_type)
-    -- Layer visibility is editor document state. Keep per-object visibility
-    -- here, but do not permanently hide the overlay because its source layer
-    -- began hidden in Tiled.
     self.visible = true
 end
 

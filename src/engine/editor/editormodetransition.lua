@@ -33,8 +33,6 @@ function EditorModeTransition:init(direction, on_handoff, on_complete)
     self.complete = false
 
     if direction == "enter" then
-        -- DarkTransition quick mode uses three square sounds separated by
-        -- three Deltarune frames. Keep that recognizable sequence compact.
         self.square_sound = Assets.newSound("dtrans_square")
         self.square_sound:setVolume(0.5)
         self.square_times = { 0, 3 / 30, 6 / 30 }

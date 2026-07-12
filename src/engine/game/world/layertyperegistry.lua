@@ -140,8 +140,7 @@ function LayerTypeRegistry:getKinds()
     return result
 end
 
----Expands the kind's `default` marker without making the encoder know about
----individual kinds. Additional nested ordering is returned separately.
+---Expands the kind's `default` marker.
 function LayerTypeRegistry:getKindFormat(id, default_format)
     local kind = self:getKind(id)
     if not kind then return TableUtils.copy(default_format or {}, true), {} end
@@ -230,7 +229,7 @@ local function isLegacyType(layer, id)
 end
 
 --- Resolves old Tiled layer naming/class conventions into an explicit editor
---- layer type. This is compatibility logic, not the new format representation.
+--- layer type.
 function LayerTypeRegistry:getLegacyTiledType(layer)
     if layer.type == "tilelayer" or layer.type == "imagelayer" then
         if isLegacyType(layer, "battleborder") then return self.types.battleborder end

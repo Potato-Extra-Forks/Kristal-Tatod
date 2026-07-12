@@ -4,7 +4,9 @@ EditorTransition.editor_sprite = "editor/transition"
 EditorTransition.placement_shape = "region"
 function EditorTransition:init(data, options)
     super.init(self, data, options)
-    self:registerProperty("map", "string")
+    self:registerProperty("map", "chooser", {
+        choices = Registry.editor_properties:registryChoices({ "maps", "map_data" }, { optional = true })
+    })
     self:registerProperty("shop", "string")
     self:registerProperty("x", "number")
     self:registerProperty("y", "number")

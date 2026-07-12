@@ -2,8 +2,6 @@
 ---@overload fun(editor: table): EditorHistory
 local EditorHistory = Class()
 
--- Kept on the class so tests and downstream builds can tune it before the
--- editor creates its history instance.
 EditorHistory.DEFAULT_LIMIT = 500
 
 function EditorHistory:init(editor, limit)
@@ -114,6 +112,16 @@ end
 
 function EditorHistory:canRedo()
     return self.transaction == nil and self.index < #self.commands
+end
+
+function EditorHistory:getUndoLabel()
+    local command = self.commands[self.index]
+    return command and command.label or nil
+end
+
+function EditorHistory:getRedoLabel()
+    local command = self.commands[self.index + 1]
+    return command and command.label or nil
 end
 
 local function restore(command, states, revisions)

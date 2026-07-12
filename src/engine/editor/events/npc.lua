@@ -25,7 +25,9 @@ function EditorNPC:getEditorSprite(data)
 end
 function EditorNPC:init(data, options)
     super.init(self, data, options)
-    self:registerProperty("actor", "string")
+    self:registerProperty("actor", "chooser", {
+        choices = Registry.editor_properties:registryChoices("actors")
+    })
     self:registerProperty("sprite", "string")
     self:registerProperty("animation", "string")
     self:registerProperty("facing", "choice", { choices = { "up", "down", "left", "right" }, default = "down" })

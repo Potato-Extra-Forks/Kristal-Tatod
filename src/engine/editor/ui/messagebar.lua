@@ -13,6 +13,14 @@ function EditorMessageBar:init()
     self.x, self.y, self.width, self.height = 0, 0, 0, self.HEIGHT
     self.entries = {}
     self.maximum_entries = 100
+    self.status = nil
+end
+
+function EditorMessageBar:setStatus(message, duration)
+    self.status = {
+        message = tostring(message or ""),
+        expires = Kristal.getTime() + (duration or 2.5)
+    }
 end
 
 function EditorMessageBar:setBounds(x, y, width)
@@ -67,6 +75,7 @@ function EditorMessageBar:getCounts()
 end
 
 function EditorMessageBar:draw()
+    if self.status and Kristal.getTime() >= self.status.expires then self.status = nil end
     local latest = self.entries[#self.entries]
     local font = EditorFont.get(16)
     love.graphics.setFont(font)
@@ -85,7 +94,10 @@ function EditorMessageBar:draw()
 
     local old_scissor = { love.graphics.getScissor() }
     love.graphics.setScissor(self.x + 8, self.y, math.max(0, self.width - counts_width - 32), self.height)
-    if latest then
+    if self.status then
+        Draw.setColor(0.72, 0.78, 0.90, 1)
+        love.graphics.print(self.status.message, self.x + 8, text_y)
+    elseif latest then
         Draw.setColor(COLORS[latest.severity])
         love.graphics.print(string.format("[%s] %s", string.upper(latest.severity), latest.message), self.x + 8, text_y)
     else

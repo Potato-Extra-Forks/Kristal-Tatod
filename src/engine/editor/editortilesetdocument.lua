@@ -187,14 +187,21 @@ function EditorTilesetDocument:getPropertiesTarget()
             numberField("Tile Width", "tile_width"), numberField("Tile Height", "tile_height"),
             numberField("Tile Count", "tile_count"), numberField("Columns", "tile_columns"),
             numberField("Margin", "margin"), numberField("Spacing", "spacing"),
-            { label = "Object Alignment", get = function() return data.alignment or "unspecified" end,
-                set = function(value) data.alignment = value return true end },
+            EditorPropertyFields.choice(data, "Object Alignment", "alignment", {
+                { value = "unspecified", label = "Unspecified" },
+                { value = "topleft", label = "Top Left" }, { value = "top", label = "Top" },
+                { value = "topright", label = "Top Right" }, { value = "left", label = "Left" },
+                { value = "center", label = "Center" }, { value = "right", label = "Right" },
+                { value = "bottomleft", label = "Bottom Left" },
+                { value = "bottom", label = "Bottom" },
+                { value = "bottomright", label = "Bottom Right" }
+            }, { default = "unspecified" }),
             offsetField("Drawing Offset X", "tile_offset_x"),
             offsetField("Drawing Offset Y", "tile_offset_y"),
-            { label = "Tile Render Size", get = function() return data.render_size or "tile" end,
-                set = function(value) data.render_size = value return true end },
-            { label = "Fill Mode", get = function() return data.fill_mode or "stretch" end,
-                set = function(value) data.fill_mode = value return true end }
+            EditorPropertyFields.choice(data, "Tile Render Size", "render_size",
+                { "tile", "grid" }, { default = "tile" }),
+            EditorPropertyFields.choice(data, "Fill Mode", "fill_mode",
+                { "stretch", "preserve-aspect-fit" }, { default = "stretch" })
         }
     }
 end
