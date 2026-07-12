@@ -845,7 +845,7 @@
           "properties": [
             {
               "name": "actor",
-              "type": "string",
+              "type": "chooser",
               "value": "starwalker"
             },
             {
@@ -913,7 +913,7 @@
           "properties": [
             {
               "name": "map",
-              "type": "string",
+              "type": "chooser",
               "value": "room2"
             },
             {
@@ -973,7 +973,7 @@
           "properties": [
             {
               "name": "actor",
-              "type": "string",
+              "type": "chooser",
               "value": "wall"
             },
             {
@@ -1008,7 +1008,7 @@
           "properties": [
             {
               "name": "map",
-              "type": "string",
+              "type": "chooser",
               "value": "voidclimb"
             },
             {

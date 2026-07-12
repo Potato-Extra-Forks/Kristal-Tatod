@@ -289,7 +289,7 @@ function Editor:registerMenuBar()
     })
     self.menu_bar:registerItem("file", "save_world", "Save Selected World", {
         is_enabled = function() return self.active_editor_world ~= nil end,
-        on_activate = function() self:saveWorldToProject(self.active_editor_world) end
+        on_activate = function() self:saveWorldDocumentToProject(self.active_editor_world) end
     })
     self.menu_bar:registerItem("file", "save_all", "Save All (Ctrl+Shift+S)", {
         is_enabled = function() return self:hasUnsavedChanges() end,
@@ -351,6 +351,10 @@ function Editor:registerEditorTools()
     self.tool_registry = EditorToolRegistry()
     self.tool_registry:register("select", {
         name = "Select", icon = "editor/ui/tool/select", keybind = "editor_tool_select"
+    })
+    self.tool_registry:register("world_select", {
+        name = "World Select", short_name = "World", icon = "editor/ui/tool/world",
+        keybind = "editor_tool_world_select"
     })
     self.tool_registry:register("object", {
         name = "Add Object", short_name = "Object", icon = "editor/ui/tool/shape_point",
@@ -1013,6 +1017,40 @@ local function validContentId(id)
     return true
 end
 
+function Editor:isValidContentId(id)
+    return validContentId(id)
+end
+
+function Editor:renameWorldId(world, id)
+    id = tostring(id or ""):match("^%s*(.-)%s*$")
+    if not world or id == world.id then return world ~= nil end
+    if not validContentId(id) then
+        self:addWarning("Invalid world ID '" .. id .. "'", nil, "world_id")
+        return false
+    end
+    local existing = Registry.getEditorWorld(id)
+    if existing and existing ~= world then
+        self:addWarning("A world with ID '" .. id .. "' already exists", nil, "world_id")
+        return false
+    end
+    local old_id = world.id
+    local document = self:findWorldDocument(old_id)
+    Registry.editor_worlds[old_id] = nil
+    world.id = id
+    world.data = world.data or {}
+    world.data.id = id
+    if document then
+        document.editor_world = true
+        document.world.id = id
+    end
+    Registry.registerEditorWorld(id, world)
+    self.active_world_id = id
+    self.active_editor_world = world
+    self:clearDiagnostics("world_id")
+    if self.world_browser then self.world_browser:refresh(id) end
+    return true
+end
+
 function Editor:getContentSavePath(kind, id)
     if not validContentId(id) then return nil, "Invalid " .. kind .. " id '" .. tostring(id) .. "'" end
     local directory = kind == "map" and Registry.paths.maps
@@ -1057,8 +1095,9 @@ function Editor:getWorldSavePath(world)
     return self:getContentSavePath("world", world.id)
 end
 
-function Editor:saveMapDocumentToProject(document)
+function Editor:saveMapDocumentToProject(document, options)
     if not document then return false end
+    options = options or {}
     local ids, seen = {}, {}
     local function add(id)
         if id and not seen[id] then seen[id] = true table.insert(ids, id) end
@@ -1118,7 +1157,7 @@ function Editor:saveMapDocumentToProject(document)
         end
         self.stale_runtime_maps[entry.id] = true
     end
-    self.history:markSaved(document)
+    if not options.defer_mark_saved then self.history:markSaved(document) end
     self:clearDiagnostics("editor_save")
     self:clearDiagnostics("unsaved_exit")
     self.discard_changes_confirmed = false
@@ -1185,6 +1224,8 @@ end
 
 function Editor:saveWorldToProject(world)
     if not world then return false end
+    local document = self:findWorldDocument(world.id)
+    if document then world = document.world end
     local data = EditorFormatDocument.buildWorldData(world)
     local encoded, reason = EditorFormat.encodeWorld(data)
     if not encoded then
@@ -1221,9 +1262,26 @@ function Editor:saveWorldToProject(world)
     return true
 end
 
+function Editor:saveWorldDocumentToProject(world)
+    if not world then return false end
+    local document = self:findWorldDocument(world.id)
+    if document then
+        world = document.world
+        if not self:saveMapDocumentToProject(document, { defer_mark_saved = true }) then return false end
+    end
+    if not self:saveWorldToProject(world) then return false end
+    if document then self.history:markSaved(document) end
+    return true
+end
+
 function Editor:saveAllDocuments()
     for _, document in ipairs(self.map_documents or {}) do
-        if document:isDirty() and not self:saveMapDocumentToProject(document) then return false end
+        if document:isDirty() then
+            local saved = document.editor_world
+                and self:saveWorldDocumentToProject(document.world)
+                or self:saveMapDocumentToProject(document)
+            if not saved then return false end
+        end
     end
     for _, document in ipairs(self.tileset_documents or {}) do
         if document:isDirty() and not self:saveTilesetDocumentToProject(document) then return false end
@@ -1235,12 +1293,15 @@ function Editor:saveActiveDocument()
     local focused = self.dockspace and self.dockspace.focused_control
     while focused do
         if focused == self.world_browser then
-            return self:saveWorldToProject(self.active_editor_world)
+            return self:saveWorldDocumentToProject(self.active_editor_world)
         end
         if focused == self.tileset_editor or focused == self.tile_palette or focused == self.tileset_browser then
             return self:saveTilesetDocumentToProject(self.active_tileset_document)
         end
         focused = focused.parent
+    end
+    if self.active_document and self.active_document.editor_world then
+        return self:saveWorldDocumentToProject(self.active_document.world)
     end
     return self:saveMapDocumentToProject(self.active_document)
 end
@@ -1391,18 +1452,34 @@ function Editor:onHistoryChanged(owners, restored, command, direction)
         owner.discard_close_confirmed = false
         local editor_world = owner.world and owner.world.id
             and Registry.getEditorWorld(owner.world.id)
-        if editor_world then
+        local is_editor_world = owner.editor_world == true or editor_world ~= nil
+        if is_editor_world then
+            local world_was_active = self.active_world_id == owner.world.id
+                or self.active_world_id == owner.previous_world_id
+            if owner.previous_world_id and owner.previous_world_id ~= owner.world.id then
+                Registry.editor_worlds[owner.previous_world_id] = nil
+            end
+            owner.previous_world_id = nil
             Registry.registerEditorWorld(owner.world.id, owner.world)
-            if self.active_world_id == owner.world.id then self.active_editor_world = owner.world end
+            if world_was_active then
+                self.active_world_id = owner.world.id
+                self.active_editor_world = owner.world
+            end
             if self.world_browser then
                 self.world_browser:refresh(owner.world.id)
-                if restored and self.active_world_id == owner.world.id then
+                self.world_browser:refreshMaps(owner.world)
+                if restored and world_was_active then
                     self.world_browser:selectWorld(owner.world)
+                elseif self.properties_browser and self.properties_browser.target
+                    and self.properties_browser.target.world_id == owner.world.id
+                    and self.properties_browser.target.world_map_id then
+                    local entry = owner.world.map_lookup[self.properties_browser.target.world_map_id]
+                    if entry then self.world_browser:selectWorldMap(entry) end
                 end
             end
         end
         if owner.panel then
-            owner.panel.title = (editor_world and owner.world.name or owner.primary_map_id)
+            owner.panel.title = (is_editor_world and owner.world.name or owner.primary_map_id)
                 .. (owner:isDirty() and " *" or "")
         end
         if restored and self.active_document == owner and self.layers_browser then
@@ -1532,10 +1609,55 @@ function Editor:addMapToWorldAtScreen(id, x, y)
         view.document.world.id = view.document.world.id or ("session:" .. view.document.primary_map_id)
         self:markHistoryChanged()
         self:commitHistoryTransaction()
+        if self.world_browser and Registry.getEditorWorld(view.document.world.id) then
+            Registry.registerEditorWorld(view.document.world.id, view.document.world)
+            self.world_browser:refreshMaps(view.document.world)
+        end
         return true
     end
     self:cancelHistoryTransaction()
     return false
+end
+
+function Editor:removeMapFromWorld(world, map_id)
+    if not world or not world.map_lookup[map_id] then return false end
+    local document = self:findWorldDocument(world.id)
+    if document and #document.maps <= 1 then
+        self:addWarning("An open world must contain at least one map",
+            "Add another map to the world view before removing this one.", "world_edit")
+        return false
+    end
+    local function remove()
+        if document and document.primary_map_id == map_id then
+            local replacement
+            for _, entry in ipairs(document.maps) do
+                if entry.id ~= map_id then replacement = entry break end
+            end
+            if not replacement then return false end
+            document.primary_map_id = replacement.id
+            document.world.primary_map_id = replacement.id
+            replacement.primary = true
+        end
+        local target = document and document.world or world
+        if not target:removeMap(map_id, true) then return false end
+        if document then
+            document.maps, document.map_lookup = target.maps, target.map_lookup
+        end
+        return true
+    end
+    local removed
+    if document then
+        removed = self:performHistoryEdit("Remove Map from World", document, remove)
+    else
+        removed = remove()
+    end
+    if not removed then return false end
+    local current = document and document.world or world
+    Registry.registerEditorWorld(current.id, current)
+    self.active_editor_world = current
+    self.active_world_id = current.id
+    self:clearDiagnostics("world_edit")
+    return true
 end
 
 function Editor:finishAssetDrag(x, y)
@@ -2348,6 +2470,7 @@ function Editor:openWorld(world)
     opened_world.primary_map_id = first.id
     if opened_world.map_lookup[first.id] then opened_world.map_lookup[first.id].primary = true end
     document.world = opened_world
+    document.editor_world = true
     document.primary_map_id = first.id
     document.maps = opened_world.maps
     document.map_lookup = opened_world.map_lookup
@@ -2464,6 +2587,33 @@ end
 function Editor:addMapToView(id, x, y, document)
     document = document or self.active_document
     return document and document:addMap(id, x, y) or nil
+end
+
+function Editor:addMapToWorld(world, map_id)
+    if not world or not map_id or world:hasMap(map_id) then return false end
+    if not Registry.getMap(map_id) and not Registry.getMapData(map_id) then return false end
+    if #(world.maps or {}) == 0 then
+        if not world:addMap(map_id, 0, 0, { explicit_companion = true }) then return false end
+        Registry.registerEditorWorld(world.id, world)
+        self.active_editor_world = world
+        self.active_world_id = world.id
+        return self:openWorld(world)
+    end
+    if not self:openWorld(world) then return false end
+    local document = self:findWorldDocument(world.id)
+    if not document then return false end
+    world = document.world
+    local _, min_y, max_x = world:getBounds()
+    local added = self:performHistoryEdit("Add Map to World", document, function()
+        return world:addMap(map_id, max_x, min_y, { explicit_companion = true }) ~= nil
+    end)
+    if not added then return false end
+    Registry.registerEditorWorld(world.id, world)
+    self.active_editor_world = world
+    self.active_world_id = world.id
+    if self.world_browser then self.world_browser:refreshMaps(world) end
+    if document.map_view then document.map_view:focusMap(map_id) end
+    return true
 end
 
 function Editor:removeMapFromView(id, document)

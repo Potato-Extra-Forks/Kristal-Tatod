@@ -139,11 +139,11 @@
           "id": 82,
           "name": "",
           "type": "",
-          "x": 422.67949192431,
-          "y": 295.35898384862,
+          "x": 440,
+          "y": 240,
           "width": 40,
           "height": 80,
-          "rotation": 330,
+          "rotation": 0,
           "shape": {
             "type": "rectangle",
             "shape_data": {}
@@ -468,7 +468,7 @@
           "properties": [
             {
               "name": "item",
-              "type": "string",
+              "type": "chooser",
               "value": "cheesekey"
             }
           ],
@@ -541,7 +541,7 @@
           "properties": [
             {
               "name": "map",
-              "type": "string",
+              "type": "chooser",
               "value": "voidclimb"
             },
             {

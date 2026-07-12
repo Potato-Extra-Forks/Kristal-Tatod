@@ -1,7 +1,7 @@
 ---@class MapUtils
 local MapUtils = {}
 
---- Walks a nested layer tree. Returning false from the callback skips children.
+--- Walks a nested layer tree.
 function MapUtils.walkLayers(layers, callback, depth, parent)
     depth = depth or 0
     for index, layer in ipairs(layers or {}) do
@@ -61,7 +61,7 @@ function MapUtils.parseMarkerProperty(obj, target, name)
     return Game.world.map:getMarker(target)
 end
 
---- Reads a list property, including the legacy numbered-field representation.
+--- Reads a list property.
 function MapUtils.parsePropertyList(id, properties)
     properties = properties or {}
     if properties[id] ~= nil then
@@ -78,7 +78,7 @@ function MapUtils.parsePropertyList(id, properties)
     return result
 end
 
---- Reads a nested list property, including the legacy numbered-field representation.
+--- Reads a nested list property.
 function MapUtils.parsePropertyMultiList(id, properties)
     properties = properties or {}
     if type(properties[id]) == "table" and TableUtils.isArray(properties[id]) then
@@ -104,7 +104,6 @@ function MapUtils.parsePropertyMultiList(id, properties)
     return result
 end
 
---- Reads the standard flag, inversion, and comparison-value property trio.
 function MapUtils.parseFlagProperties(flag, inverted, value, default_value, properties)
     properties = properties or {}
     local result_inverted = false
@@ -118,8 +117,6 @@ function MapUtils.parseFlagProperties(flag, inverted, value, default_value, prop
     return result_flag, result_inverted, result_value
 end
 
---- Resolves explicit polyline point-index connections, falling back to a
---- conventional consecutive path when no topology is stored.
 function MapUtils.getPolylineEdges(data, point_count)
     local shape_data = data and data.shape_data or data or {}
     local source = shape_data.edges

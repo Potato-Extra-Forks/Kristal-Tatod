@@ -97,13 +97,6 @@ function EditorMapReader.operations.createTileLayer(map, layer)
     return TileLayer(map, runtime_layer)
 end
 
-function EditorMapReader.operations.createTileObject(map, data, x, y, width, height)
-    local tileset = map:getTileset(data.tileset)
-    if not tileset then return nil end
-    return TileObject(tileset, data.tile_id, x or data.x, y or data.y,
-        width or data.width, height or data.height, math.rad(data.rotation or 0), false, false)
-end
-
 function EditorMapReader.operations.loadLayer(map, layer, depth)
     local kind = Registry.layer_types:getLayerKind(layer)
     local layer_type = Registry.getLayerType(layer._editor_type_id or layer.type)

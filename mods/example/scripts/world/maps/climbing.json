@@ -908,7 +908,7 @@
           "properties": [
             {
               "name": "map",
-              "type": "string",
+              "type": "chooser",
               "value": "room2"
             },
             {
@@ -1138,7 +1138,7 @@
           "properties": [
             {
               "name": "map",
-              "type": "string",
+              "type": "chooser",
               "value": "postclimb"
             },
             {

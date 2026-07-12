@@ -238,8 +238,6 @@ EditorFormat.ORDERING = {
     }
 }
 
---- Shape position, size, and rotation live on the object. Shape data only stores
---- topology that cannot be represented by those common object fields.
 EditorFormat.SHAPE_DATA_TYPES = {
     point = {},
     line = {

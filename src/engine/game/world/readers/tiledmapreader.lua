@@ -176,11 +176,11 @@ end
 
 function operations.isLayerType(self, layer, type)
     if layer.class ~= nil and layer.class ~= "" then
-        -- If there's a defined class, check that (strict)
+        -- If there's a defined class, check that
         return layer.class == type
     end
 
-    -- If there isn't a class, use the name (loose)
+    -- If there isn't a class, use the name
     return StringUtils.startsWith(layer.name:lower(), type)
 end
 
@@ -278,23 +278,6 @@ function operations.loadTilesetFromTilesetPath(self, filename)
     end
 
     return true, tileset
-end
-
-function operations.getTileObjectRect(self, data)
-    local gid = TiledUtils.parseTileGid(data.gid)
-    local tileset = self:getTileset(gid)
-
-    local origin = Tileset.ORIGINS[tileset.object_alignment] or Tileset.ORIGINS["unspecified"]
-
-    return data.x - (origin[1] * data.width), data.y - (origin[2] * data.height), data.width, data.height
-end
-
-function operations.createTileObject(self, data, x, y, width, height)
-    if data.gid then
-        local gid, flip_x, flip_y = TiledUtils.parseTileGid(data.gid)
-        local tileset, tile_id = self:getTileset(gid)
-        return TileObject(tileset, tile_id, x or data.x, y or data.y, width or data.width, height or data.height, math.rad(data.rotation or 0), flip_x, flip_y)
-    end
 end
 
 return TiledMapReader

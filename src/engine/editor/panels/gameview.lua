@@ -29,15 +29,21 @@ function EditorGameView:getPrimaryEntry()
     return self.document and self.document:getPrimaryMap() or nil
 end
 
+function EditorGameView:getRuntimeEntry()
+    local map = Game.world and Game.world.map
+    return self.document and map and self.document.map_lookup[map.id]
+        or self:getPrimaryEntry()
+end
+
 function EditorGameView:drawCompanionMaps()
     local document = self.document
-    local primary = self:getPrimaryEntry()
-    if not document or not primary then return end
+    local runtime = self:getRuntimeEntry()
+    if not document or not runtime then return end
     for _, entry in ipairs(document.maps) do
-        if entry ~= primary then
+        if entry ~= runtime then
             love.graphics.push()
             love.graphics.applyTransform(Game.world.camera:getTransform())
-            love.graphics.translate(entry.x - primary.x, entry.y - primary.y)
+            love.graphics.translate(entry.x - runtime.x, entry.y - runtime.y)
             document:drawPreview(entry)
             love.graphics.pop()
         end
@@ -195,8 +201,8 @@ function EditorGameView:drawMapOuterBounds()
     local camera_zoom = math.max(math.abs(world.camera.zoom_x), math.abs(world.camera.zoom_y), 0.001)
     love.graphics.setLineWidth(2 / (self.view_zoom * camera_zoom))
     Draw.setColor(1, 1, 1, 0.4)
-    local primary = self:getPrimaryEntry()
-    local primary_x, primary_y = primary and primary.x or 0, primary and primary.y or 0
+    local runtime = self:getRuntimeEntry()
+    local runtime_x, runtime_y = runtime and runtime.x or 0, runtime and runtime.y or 0
     love.graphics.rectangle("line", 0, 0, map.width * map.tile_width, map.height * map.tile_height)
     if self.editor and self.editor.show_tile_grid then
         self:drawTileGrid(0, 0, map.width * map.tile_width, map.height * map.tile_height,
@@ -204,12 +210,12 @@ function EditorGameView:drawMapOuterBounds()
     end
     if self.document then
         for _, entry in ipairs(self.document.maps) do
-            if entry ~= primary and entry.width and entry.height then
+            if entry ~= runtime and entry.width and entry.height then
                 Draw.setColor(1, 1, 1, 0.4)
-                love.graphics.rectangle("line", entry.x - primary_x, entry.y - primary_y,
+                love.graphics.rectangle("line", entry.x - runtime_x, entry.y - runtime_y,
                     entry.width, entry.height)
                 if self.editor.show_tile_grid then
-                    self:drawTileGrid(entry.x - primary_x, entry.y - primary_y, entry.width, entry.height,
+                    self:drawTileGrid(entry.x - runtime_x, entry.y - runtime_y, entry.width, entry.height,
                         entry.tile_width, entry.tile_height, camera_zoom)
                 end
             end
@@ -324,8 +330,8 @@ function EditorGameView:getMapCoordinates(x, y)
         (x - self.canvas_x) / self.view_zoom,
         (y - self.canvas_y) / self.view_zoom
     )
-    local primary = self:getPrimaryEntry()
-    return map_x + (primary and primary.x or 0), map_y + (primary and primary.y or 0)
+    local runtime = self:getRuntimeEntry()
+    return map_x + (runtime and runtime.x or 0), map_y + (runtime and runtime.y or 0)
 end
 
 function EditorGameView:drawCursorAndCoordinates()

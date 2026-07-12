@@ -2,7 +2,6 @@
 ---@overload fun(layer: table, layer_type?: table, depth?: number): EditorLayerOverlay
 local EditorLayerOverlay = Class()
 
---- Stage-independent rendering for editor-only object layers.
 function EditorLayerOverlay:init(layer, layer_type, depth)
     self.source_layer = layer
     self.layer_uid = layer._editor_uid

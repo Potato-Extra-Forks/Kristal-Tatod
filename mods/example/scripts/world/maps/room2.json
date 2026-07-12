@@ -309,12 +309,12 @@
           "properties": [
             {
               "name": "actor",
-              "type": "string",
+              "type": "chooser",
               "value": "dummy"
             },
             {
               "name": "encounter",
-              "type": "string",
+              "type": "chooser",
               "value": "dummy"
             }
           ],
@@ -337,7 +337,7 @@
           "properties": [
             {
               "name": "map",
-              "type": "string",
+              "type": "chooser",
               "value": "room1"
             },
             {
@@ -365,7 +365,7 @@
           "properties": [
             {
               "name": "map",
-              "type": "string",
+              "type": "chooser",
               "value": "climbing"
             },
             {

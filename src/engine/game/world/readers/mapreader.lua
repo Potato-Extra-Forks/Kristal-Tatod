@@ -48,6 +48,38 @@ function operations.getTileset(self, id)
     return nil, 0
 end
 
+local function getTileObjectInfo(self, data)
+    if data.gid then
+        local gid, flip_x, flip_y = MapUtils.unpackTileGid(data.gid)
+        local tileset, tile_id = self:getTileset(gid)
+        return tileset, tile_id, flip_x, flip_y
+    end
+    local tileset = data.tileset and self:getTileset(data.tileset) or nil
+    return tileset, data.tile_id, data.flip_x == true, data.flip_y == true
+end
+
+function operations.getTileObjectRect(self, data)
+    local tileset, tile_id = getTileObjectInfo(self, data)
+    local tile_width, tile_height = data.width, data.height
+    if tileset and (tile_width == nil or tile_height == nil) then
+        local width, height = tileset:getTileSize(tile_id)
+        tile_width, tile_height = tile_width or width, tile_height or height
+    end
+    tile_width, tile_height = tile_width or 0, tile_height or 0
+    local origin = tileset and Tileset.ORIGINS[tileset.object_alignment]
+        or Tileset.ORIGINS["unspecified"]
+    return (data.x or 0) - origin[1] * tile_width,
+        (data.y or 0) - origin[2] * tile_height, tile_width, tile_height
+end
+
+function operations.createTileObject(self, data, x, y, width, height)
+    local tileset, tile_id, flip_x, flip_y = getTileObjectInfo(self, data)
+    if not tileset or tile_id == nil then return nil end
+    return TileObject(tileset, tile_id, x or data.x, y or data.y,
+        width or data.width, height or data.height,
+        math.rad(data.rotation or 0), flip_x, flip_y)
+end
+
 function operations.loadImage(self, layer, depth)
     local success, texture_result = self:loadTextureFromImagePath(layer.image)
     if not success then
@@ -287,7 +319,7 @@ function operations.loadObjects(self, layer, depth, layer_type)
                     obj.layer_name = layer.name
                     obj.data = v
 
-                    if v.gid and obj.applyTileObject then
+                    if (v.gid or v.tileset and v.tile_id ~= nil) and obj.applyTileObject then
                         obj:applyTileObject(v, self)
                     end
 

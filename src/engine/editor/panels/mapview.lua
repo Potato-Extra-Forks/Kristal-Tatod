@@ -81,6 +81,29 @@ function EditorMapView:centerCanvas()
         (self.height - height) / 2 - (min_y - primary_y) * self.view_zoom)
 end
 
+function EditorMapView:focusMap(map_id)
+    local entry = self.document and self.document.map_lookup[map_id]
+    local primary = self:getPrimaryEntry()
+    if not entry or not primary then return false end
+    self:setCanvasPosition(
+        self.width / 2 - (entry.x + (entry.width or 0) / 2 - primary.x) * self.view_zoom,
+        self.height / 2 - (entry.y + (entry.height or 0) / 2 - primary.y) * self.view_zoom)
+    return true
+end
+
+function EditorMapView:selectWorldMap(entry)
+    self.selected_world_map_id = entry and entry.id or nil
+    self.editor:selectMapObjects({})
+    local world = self.document and self.document.world
+    if entry and world and Registry.getEditorWorld(world.id) and self.editor.world_browser then
+        self.editor.active_world_id = world.id
+        self.editor.active_editor_world = world
+        self.editor.world_browser:refresh(world.id)
+        self.editor.world_browser:refreshMaps(world)
+        self.editor.world_browser:selectWorldMap(entry)
+    end
+end
+
 function EditorMapView:getCanvasDisplayCenter()
     local primary = self:getPrimaryEntry()
     return self.canvas_x + (primary and primary.width or SCREEN_WIDTH) * self.view_zoom / 2,
@@ -111,7 +134,10 @@ function EditorMapView:drawDocument()
     Draw.setColor(1, 1, 1, 0.4)
     for _, entry in ipairs(document.maps) do
         if entry.width and entry.height then
-            Draw.setColor(1, 1, 1, 0.4)
+            local selected = self.editor and self.editor.active_tool == "world_select"
+                and self.selected_world_map_id == entry.id
+            love.graphics.setLineWidth((selected and 3 or 2) / self.view_zoom)
+            Draw.setColor(selected and { 1, 0.84, 0.2, 0.95 } or { 1, 1, 1, 0.4 })
             love.graphics.rectangle("line", entry.x, entry.y, entry.width, entry.height)
             if self.editor and self.editor.show_tile_grid then
                 self:drawTileGrid(entry.x, entry.y, entry.width, entry.height,
@@ -145,7 +171,8 @@ function EditorMapView:drawObjectLinks()
     for _, selection in ipairs(self.editor and self.editor:getSelectedMapObjects(self.document) or {}) do
         local x1, y1 = self.document:getObjectWorldCenter(selection)
         for _, target in ipairs(self.document:getObjectLinks(selection)) do
-            local x2, y2 = self.document:getObjectWorldCenter(target)
+            local x2, y2 = target.world_x, target.world_y
+            if not x2 then x2, y2 = self.document:getObjectWorldCenter(target) end
             drawDashedLine(x1, y1, x2, y2, 8 / self.view_zoom)
         end
     end
@@ -711,6 +738,24 @@ function EditorMapView:onMousePressed(x, y, button, presses)
     if button == 1 or button == 2 then
         local world_x, world_y = self:getMapCoordinates(x, y)
         local tool = self.editor.active_tool
+        if tool == "world_select" then
+            if button == 1 then
+                local entry = self.document:getMapAt(world_x, world_y)
+                self:selectWorldMap(entry)
+                if entry then
+                    self.map_drag = {
+                        entry = entry,
+                        start_x = world_x,
+                        start_y = world_y,
+                        entry_x = entry.x,
+                        entry_y = entry.y
+                    }
+                    self.editor:beginHistoryTransaction("Move Map", self.document)
+                end
+                return true
+            end
+            return false
+        end
         if self.polygon_build and button == 2 then
             table.remove(self.polygon_build.points)
             if #self.polygon_build.points == 0 then self:cancelPolygon() end
@@ -1168,6 +1213,10 @@ function EditorMapView:getCursorType(x, y)
     if self.rotation_drag then return "resize_all" end
     if self.tile_stroke then return "crosshair" end
     if self.editor and self.editor.active_tool == "link" then return "link" end
+    if self.editor and self.editor.active_tool == "world_select" then
+        local world_x, world_y = self:getMapCoordinates(x, y)
+        return self.document:getMapAt(world_x, world_y) and "grab" or "default"
+    end
     if self.editor and (self.editor.active_tool == "object" or self.editor.active_tool == "shape"
         or self.editor.active_tool == "tile_brush" or self.editor.active_tool == "tile_fill") then
         return "crosshair"

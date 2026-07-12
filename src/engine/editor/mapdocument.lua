@@ -92,6 +92,7 @@ end
 
 function EditorMapDocument:restoreHistoryState(state)
     if not state then return false end
+    self.previous_world_id = self.world and self.world.id
     local world = EditorWorld(state.world_id)
     world.name = state.world_name or state.world_id
     world.data = TableUtils.copy(state.world_data or {}, true)
@@ -1102,6 +1103,72 @@ function EditorMapDocument:getObjectReferenceValues(selection)
     return result
 end
 
+local function getEditorObjectType(data)
+    local event_id = data.type or data.class
+    if event_id == nil or event_id == "" then event_id = data.name end
+    return type(event_id) == "string" and event_id:lower() or event_id
+end
+
+function EditorMapDocument:findMarkerSelection(map_id, marker)
+    local reference = EditorObjectReference.from(marker, map_id)
+    map_id = reference.map_id or map_id
+    if not self.map_lookup[map_id] or reference.object_id == nil then return nil end
+    for _, layer_entry in ipairs(self:getFlatEditableLayers(map_id, false)) do
+        local layer = layer_entry.layer
+        local marker_layer = layer._editor_type_id == "markers" or layer.type == "markers"
+            or tostring(layer.name or ""):lower() == "markers"
+        if marker_layer then
+            for _, object in ipairs(layer.objects or {}) do
+                if tostring(object.id) == tostring(reference.object_id)
+                    or tostring(object.name) == tostring(reference.object_id) then
+                    return self:getObjectSelection(map_id, layer, object)
+                end
+            end
+        end
+    end
+end
+
+function EditorMapDocument:getTransitionLink(selection)
+    if getEditorObjectType(selection.data) ~= "transition" then return nil end
+    local properties = selection.data.properties or {}
+    local target_map = properties.map
+    local target_entry = target_map and self.map_lookup[target_map]
+    if not target_entry then return nil end
+
+    local arrival = properties.marker and self:findMarkerSelection(target_map, properties.marker) or nil
+    local arrival_x, arrival_y
+    if arrival then
+        arrival_x, arrival_y = self:getObjectWorldCenter(arrival)
+    elseif tonumber(properties.x) and tonumber(properties.y) then
+        arrival_x = target_entry.x + tonumber(properties.x)
+        arrival_y = target_entry.y + tonumber(properties.y)
+    end
+
+    local reciprocal, reciprocal_distance
+    for _, layer in ipairs(self:getAllEditableLayers(target_map)) do
+        for _, object in ipairs(layer.objects or {}) do
+            if getEditorObjectType(object) == "transition"
+                and object.properties and object.properties.map == selection.map_id then
+                local candidate = self:getObjectSelection(target_map, layer, object)
+                local x, y = self:getObjectWorldCenter(candidate)
+                local distance = arrival_x and ((x - arrival_x) ^ 2 + (y - arrival_y) ^ 2) or 0
+                if not reciprocal or distance < reciprocal_distance then
+                    reciprocal, reciprocal_distance = candidate, distance
+                end
+            end
+        end
+    end
+    if reciprocal then return reciprocal end
+    if arrival then return arrival end
+    return {
+        map_id = target_map,
+        entry = target_entry,
+        object_id = "transition_destination",
+        world_x = arrival_x or target_entry.x + (target_entry.width or 0) / 2,
+        world_y = arrival_y or target_entry.y + (target_entry.height or 0) / 2
+    }
+end
+
 function EditorMapDocument:getObjectLinks(selection)
     local links, seen = {}, {}
     local function add(candidate)
@@ -1116,6 +1183,7 @@ function EditorMapDocument:getObjectLinks(selection)
             if not seen[key] then seen[key] = true table.insert(links, candidate) end
         end
     end
+    add(self:getTransitionLink(selection))
     for _, value in ipairs(self:getObjectReferenceValues(selection)) do add(self:resolveObjectReference(value)) end
     for _, entry in ipairs(self.maps) do
         for _, layer in ipairs(self:getAllEditableLayers(entry.id)) do

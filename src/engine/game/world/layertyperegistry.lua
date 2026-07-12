@@ -140,7 +140,6 @@ function LayerTypeRegistry:getKinds()
     return result
 end
 
----Expands the kind's `default` marker.
 function LayerTypeRegistry:getKindFormat(id, default_format)
     local kind = self:getKind(id)
     if not kind then return TableUtils.copy(default_format or {}, true), {} end
@@ -155,8 +154,6 @@ function LayerTypeRegistry:getKindFormat(id, default_format)
     return result, TableUtils.copy(kind.extra_format or {}, true)
 end
 
----Kind callbacks operate on format data, not runtime Layer instances. They are
----the extension point for plugin kinds whose payload needs normalization.
 function LayerTypeRegistry:encodeKind(id, layer, context)
     local kind = self:getKind(id)
     if not kind then return TableUtils.copy(layer, true), nil, false end
@@ -170,8 +167,6 @@ end
 function LayerTypeRegistry:decodeKind(id, data, context)
     local kind = self:getKind(id)
     if not kind then
-        -- Retain unknown plugin-kind payloads for a later session where the
-        -- owning plugin may be installed again.
         return TableUtils.copy(data, true), nil, false
     end
     if kind.decode then
@@ -228,8 +223,7 @@ local function isLegacyType(layer, id)
     return StringUtils.startsWith((layer.name or ""):lower(), id)
 end
 
---- Resolves old Tiled layer naming/class conventions into an explicit editor
---- layer type.
+--- Resolves old Tiled layer naming/class conventions into an explicit editor layer type.
 function LayerTypeRegistry:getLegacyTiledType(layer)
     if layer.type == "tilelayer" or layer.type == "imagelayer" then
         if isLegacyType(layer, "battleborder") then return self.types.battleborder end
