@@ -50,6 +50,7 @@ local DEFAULT_KINDS = {
 
 local DEFAULT_TYPES = {
     { id = "default",        name = "Unknown",         kind = "object", icon = "editor/ui/layer/default",        color = { 0.8, 0.8, 0.82, 1 } },
+    { id = "folder",         name = "Unknown",         kind = "group",  icon = "editor/ui/layer/default",        color = { 1, 1, 1, 1 } },
     { id = "tile",           name = "Tiles",           kind = "tile",   icon = "editor/ui/layer/tile",           color = { 0.8, 0.8, 0.82, 1 } },
     { id = "image",          name = "Image",           kind = "image",  icon = "editor/ui/layer/image",          color = { 0.8, 0.8, 0.82, 1 } },
     { id = "objects",        name = "Objects",         kind = "object", icon = "editor/ui/layer/objects",        color = { 0, 1, 1, 1 } },

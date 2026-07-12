@@ -2,6 +2,14 @@
 ---@overload fun(editor?: table, document?: EditorMapDocument): EditorMapView
 local EditorMapView, super = Class(EditorGameView)
 
+local function pointsEqual(a, b)
+    return a and b and a.x == b.x and a.y == b.y
+end
+
+local EXPLOSION_DURATION = 0.8
+local UNEXPLOSION_SPEED = 1.5
+local UNEXPLOSION_DELAY = 0.1
+
 function EditorMapView:init(editor, document)
     super.init(self, editor, document)
     self.is_game_preview = false
@@ -28,15 +36,23 @@ function EditorMapView:getDocumentBounds()
 end
 
 function EditorMapView:addExplosion(world_x, world_y)
-    table.insert(self.explosions, { x = world_x, y = world_y, time = 0 })
+    table.insert(self.explosions, { x = world_x, y = world_y, time = 0, reverse = false })
     Assets.playSound("badexplosion")
+end
+
+function EditorMapView:addUnexplosion(world_x, world_y)
+    table.insert(self.explosions, { x = world_x, y = world_y, time = 0, reverse = true })
+    Assets.playSound("noisolpxedab")
 end
 
 function EditorMapView:update(dt)
     for index = #self.explosions, 1, -1 do
         local effect = self.explosions[index]
         effect.time = effect.time + dt
-        if effect.time >= 0.8 then table.remove(self.explosions, index) end
+        local duration = effect.reverse and (EXPLOSION_DURATION / UNEXPLOSION_SPEED)
+            or EXPLOSION_DURATION
+        local delay = effect.reverse and UNEXPLOSION_DELAY or 0
+        if effect.time >= delay + duration then table.remove(self.explosions, index) end
     end
     super.update(self, dt)
 end
@@ -141,9 +157,23 @@ function EditorMapView:getSelectionBounds(selections)
 end
 
 function EditorMapView:getRotationHandle(selections)
+    selections = selections or (self.editor and self.editor:getSelectedMapObjects(self.document)) or {}
+    if #selections == 1 then
+        local selection = selections[1]
+        local origin_x, origin_y = self.document:getObjectWorldPosition(selection)
+        local width = selection.data.width or 0
+        local rotation = math.rad(selection.data.rotation or 0)
+        local anchor_x = origin_x + width / 2 * math.cos(rotation)
+        local anchor_y = origin_y + width / 2 * math.sin(rotation)
+        local distance = 22 / self.view_zoom
+        local handle_x = anchor_x + distance * math.sin(rotation)
+        local handle_y = anchor_y - distance * math.cos(rotation)
+        return handle_x, handle_y, anchor_x, anchor_y
+    end
     local min_x, min_y, max_x = self:getSelectionBounds(selections)
     if not min_x then return nil end
-    return (min_x + max_x) / 2, min_y - 22 / self.view_zoom
+    local anchor_x, anchor_y = (min_x + max_x) / 2, min_y
+    return anchor_x, anchor_y - 22 / self.view_zoom, anchor_x, anchor_y
 end
 
 function EditorMapView:isRotationHandleAt(world_x, world_y)
@@ -152,6 +182,86 @@ function EditorMapView:isRotationHandleAt(world_x, world_y)
     local handle_x, handle_y = self:getRotationHandle(selections)
     local distance = 9 / self.view_zoom
     return math.abs(world_x - handle_x) <= distance and math.abs(world_y - handle_y) <= distance
+end
+
+function EditorMapView:snapToMapGrid(entry, world_x, world_y)
+    if Input.ctrl() then return world_x, world_y end
+    local tile_width, tile_height = entry.tile_width or 40, entry.tile_height or 40
+    return entry.x + MathUtils.round((world_x - entry.x) / tile_width) * tile_width,
+        entry.y + MathUtils.round((world_y - entry.y) / tile_height) * tile_height
+end
+
+function EditorMapView:getPolygonVertexAt(world_x, world_y)
+    local selections = self.editor and self.editor:getSelectedMapObjects(self.document) or {}
+    if #selections ~= 1 or not selections[1].data.polygon then return nil end
+    local distance = 9 / self.view_zoom
+    for index in ipairs(selections[1].data.polygon) do
+        local x, y = self.document:getPolygonWorldPoint(selections[1], index)
+        if x and math.abs(world_x - x) <= distance and math.abs(world_y - y) <= distance then
+            return selections[1], index
+        end
+    end
+end
+
+function EditorMapView:getResizeCornerAt(selection, world_x, world_y)
+    if not selection or selection.data.polygon then return nil end
+    local width, height = selection.data.width or 0, selection.data.height or 0
+    if width == 0 and height == 0 then return nil end
+    local object_x, object_y = self.document:getObjectWorldPosition(selection)
+    local rotation = -math.rad(selection.data.rotation or 0)
+    local dx, dy = world_x - object_x, world_y - object_y
+    local local_x = dx * math.cos(rotation) - dy * math.sin(rotation)
+    local local_y = dx * math.sin(rotation) + dy * math.cos(rotation)
+    local distance = 10 / self.view_zoom
+    local corners = {
+        { id = "nw", x = 0, y = 0 }, { id = "ne", x = width, y = 0 },
+        { id = "sw", x = 0, y = height }, { id = "se", x = width, y = height }
+    }
+    for _, corner in ipairs(corners) do
+        if math.abs(local_x - corner.x) <= distance
+            and math.abs(local_y - corner.y) <= distance then return corner.id end
+    end
+end
+
+function EditorMapView:getSelectedResizeCornerAt(world_x, world_y)
+    local selections = self.editor and self.editor:getSelectedMapObjects(self.document) or {}
+    if #selections ~= 1 then return nil end
+    local corner = self:getResizeCornerAt(selections[1], world_x, world_y)
+    if corner then return selections[1], corner end
+end
+
+function EditorMapView:getResizeCursor(selection, corner)
+    local width, height = selection.data.width or 0, selection.data.height or 0
+    local corner_x = (corner == "ne" or corner == "se") and width or 0
+    local corner_y = (corner == "sw" or corner == "se") and height or 0
+    local angle = math.atan2(corner_y - height / 2, corner_x - width / 2)
+        + math.rad(selection.data.rotation or 0)
+    return math.sin(angle * 2) >= 0 and "resize_diag_l" or "resize_diag_r"
+end
+
+function EditorMapView:openPolygonVertexContext(selection, index, x, y)
+    local points = selection.data.polygon
+    local next_index = index % #points + 1
+    local x1, y1 = self.document:getPolygonWorldPoint(selection, index)
+    local x2, y2 = self.document:getPolygonWorldPoint(selection, next_index)
+    local items = {
+        { label = "Insert Vertex After", action = function()
+            local inserted = self.editor:performHistoryEdit("Insert Polygon Vertex", self.document, function()
+                return self.document:insertPolygonWorldPoint(selection, index, (x1 + x2) / 2, (y1 + y2) / 2)
+            end)
+            if inserted then self.editor:selectMapObjects({ selection }, selection) end
+        end }
+    }
+    if #points > 3 then
+        table.insert(items, { label = "Delete Vertex", action = function()
+            if self.editor:performHistoryEdit("Delete Polygon Vertex", self.document, function()
+                return self.document:removePolygonPoint(selection, index)
+            end) then
+                self.editor:selectMapObjects({ selection }, selection)
+            end
+        end })
+    end
+    return self.editor.dockspace:openContextMenu(items, x, y, self)
 end
 
 function EditorMapView:drawSelectedObject()
@@ -167,10 +277,26 @@ function EditorMapView:drawSelectedObject()
         love.graphics.rotate(math.rad(selection.data.rotation or 0))
         if width == 0 and height == 0 then
             love.graphics.circle("line", 0, 0, 8 / self.view_zoom)
+        elseif selection.data.polygon and #selection.data.polygon >= 3 then
+            local coordinates = {}
+            for _, point in ipairs(selection.data.polygon) do
+                table.insert(coordinates, point.x or point[1] or 0)
+                table.insert(coordinates, point.y or point[2] or 0)
+            end
+            love.graphics.polygon("line", coordinates)
+            if #selections == 1 then
+                local radius = 5 / self.view_zoom
+                for index = 1, #coordinates, 2 do
+                    love.graphics.circle("fill", coordinates[index], coordinates[index + 1], radius)
+                end
+            end
         else
             love.graphics.rectangle("line", 0, 0, width, height)
             if #selections == 1 then
                 local handle = 7 / self.view_zoom
+                love.graphics.rectangle("fill", -handle / 2, -handle / 2, handle, handle)
+                love.graphics.rectangle("fill", width - handle / 2, -handle / 2, handle, handle)
+                love.graphics.rectangle("fill", -handle / 2, height - handle / 2, handle, handle)
                 love.graphics.rectangle("fill", width - handle / 2, height - handle / 2, handle, handle)
             end
         end
@@ -181,9 +307,9 @@ function EditorMapView:drawSelectedObject()
         Draw.setColor(1, 0.86, 0.2, 0.7)
         love.graphics.rectangle("line", min_x, min_y, max_x - min_x, max_y - min_y)
     end
-    local handle_x, handle_y = self:getRotationHandle(selections)
+    local handle_x, handle_y, anchor_x, anchor_y = self:getRotationHandle(selections)
     Draw.setColor(1, 0.86, 0.2, 0.8)
-    love.graphics.line((min_x + max_x) / 2, min_y, handle_x, handle_y)
+    love.graphics.line(anchor_x, anchor_y, handle_x, handle_y)
     love.graphics.circle("fill", handle_x, handle_y, 5 / self.view_zoom)
 end
 
@@ -201,21 +327,30 @@ end
 
 function EditorMapView:drawShapePreview()
     if self.polygon_build then
+        local build = self.polygon_build
         local coordinates = {}
-        for _, point in ipairs(self.polygon_build.points) do
+        for _, point in ipairs(build.points) do
             table.insert(coordinates, point.x)
             table.insert(coordinates, point.y)
         end
-        if self.polygon_build.current_x then
-            table.insert(coordinates, self.polygon_build.current_x)
-            table.insert(coordinates, self.polygon_build.current_y)
+        if build.current_x then
+            table.insert(coordinates, build.current_x)
+            table.insert(coordinates, build.current_y)
         end
         love.graphics.setLineWidth(2 / self.view_zoom)
         Draw.setColor(0.48, 0.78, 1, 0.9)
         if #coordinates >= 4 then love.graphics.line(coordinates) end
+        if #build.points >= 2 and build.current_x then
+            Draw.setColor(0.48, 0.78, 1, 0.45)
+            love.graphics.line(build.current_x, build.current_y, build.points[1].x, build.points[1].y)
+        end
+        Draw.setColor(0.48, 0.78, 1, 1)
+        for _, point in ipairs(build.points) do
+            love.graphics.circle("fill", point.x, point.y, 4 / self.view_zoom)
+        end
         return
     end
-    local drag = self.shape_drag
+    local drag = self.event_region_drag or self.shape_drag
     if not drag then return end
     local x, y = math.min(drag.start_x, drag.current_x), math.min(drag.start_y, drag.current_y)
     local width, height = math.abs(drag.current_x - drag.start_x), math.abs(drag.current_y - drag.start_y)
@@ -232,13 +367,36 @@ end
 
 function EditorMapView:finishPolygon()
     local build = self.polygon_build
+    if not build then return false end
+    local points = {}
+    for _, point in ipairs(build.points) do
+        if not pointsEqual(points[#points], point) then
+            table.insert(points, { x = point.x, y = point.y })
+        end
+    end
+    if #points > 1 and pointsEqual(points[1], points[#points]) then table.remove(points) end
+    if #points < 3 then
+        self.editor:addWarning("A polygon requires at least three distinct points",
+            "Click additional points, then press Enter, double-click, or click the first point to finish.",
+            "shape_placement")
+        return true
+    end
+    local area = 0
+    for index, point in ipairs(points) do
+        local next_point = points[index % #points + 1]
+        area = area + point.x * next_point.y - next_point.x * point.y
+    end
+    if math.abs(area) < 0.001 then
+        self.editor:addWarning("A polygon needs a non-zero enclosed area", nil, "shape_placement")
+        return true
+    end
     self.polygon_build = nil
-    if not build or #build.points < 3 then return false end
-    local object, layer_or_reason, map_id = self.document:addPolygonObject(build.map_id, build.points)
+    self.editor:clearDiagnostics("shape_placement")
+    local object, layer_or_reason, map_id = self.document:addPolygonObject(build.map_id, points)
     if not object then
         self.editor:cancelHistoryTransaction()
         self.editor:addWarning(layer_or_reason, nil, "shape_placement")
-        return false
+        return true
     end
     local selection = self.document:getObjectSelection(map_id, layer_or_reason, object)
     selection.view = self
@@ -248,13 +406,36 @@ function EditorMapView:finishPolygon()
     return true
 end
 
+function EditorMapView:cancelPolygon()
+    if not self.polygon_build then return false end
+    self.polygon_build = nil
+    self.editor:cancelHistoryTransaction()
+    self.editor:clearDiagnostics("shape_placement")
+    return true
+end
+
+function EditorMapView:cancelEventRegion()
+    if not self.event_region_drag then return false end
+    self.event_region_drag = nil
+    self.editor:cancelHistoryTransaction()
+    return true
+end
+
 function EditorMapView:drawExplosions()
     local frames = Assets.getFrames("misc/realistic_explosion")
     if not frames or #frames == 0 then return end
     for _, effect in ipairs(self.explosions) do
-        local frame = frames[math.min(#frames, math.floor(effect.time / 0.8 * #frames) + 1)]
-        Draw.setColor(1, 1, 1, 1)
-        Draw.draw(frame, effect.x, effect.y, 0, 2, 2, frame:getWidth() / 2, frame:getHeight() / 2)
+        local delay = effect.reverse and UNEXPLOSION_DELAY or 0
+        if effect.time >= delay then
+            local duration = effect.reverse and (EXPLOSION_DURATION / UNEXPLOSION_SPEED)
+                or EXPLOSION_DURATION
+            local visual_time = effect.time - delay
+            local frame_index = math.min(#frames, math.floor(visual_time / duration * #frames) + 1)
+            if effect.reverse then frame_index = #frames - frame_index + 1 end
+            local frame = frames[math.max(1, frame_index)]
+            Draw.setColor(1, 1, 1, 1)
+            Draw.draw(frame, effect.x, effect.y, 0, 2, 2, frame:getWidth() / 2, frame:getHeight() / 2)
+        end
     end
 end
 
@@ -288,6 +469,27 @@ function EditorMapView:onMousePressed(x, y, button, presses)
     if button == 1 or button == 2 then
         local world_x, world_y = self:getMapCoordinates(x, y)
         local tool = self.editor.active_tool
+        if self.polygon_build and button == 2 then
+            table.remove(self.polygon_build.points)
+            if #self.polygon_build.points == 0 then self:cancelPolygon() end
+            return true
+        end
+        if button == 1 and tool == "select" then
+            local vertex_selection, vertex_index = self:getPolygonVertexAt(world_x, world_y)
+            if vertex_selection then
+                self.polygon_vertex_drag = { selection = vertex_selection, index = vertex_index }
+                self.editor:beginHistoryTransaction("Move Polygon Vertex", self.document)
+                return true
+            end
+        end
+        if button == 2 and tool == "select" then
+            local vertex_selection, vertex_index = self:getPolygonVertexAt(world_x, world_y)
+            if vertex_selection then
+                local global_x, global_y = self:getGlobalPosition()
+                return self:openPolygonVertexContext(vertex_selection, vertex_index,
+                    global_x + x, global_y + y)
+            end
+        end
         if button == 1 and tool == "select" and self:isRotationHandleAt(world_x, world_y) then
             local selections = self.editor:getSelectedMapObjects(self.document)
             local min_x, min_y, max_x, max_y = self:getSelectionBounds(selections)
@@ -310,6 +512,27 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             self.editor:beginHistoryTransaction("Rotate Objects", self.document)
             return true
         end
+        if button == 1 and tool == "select" then
+            local resize_selection, resize_corner = self:getSelectedResizeCornerAt(world_x, world_y)
+            if resize_selection then
+                local object_x, object_y = self.document:getObjectWorldPosition(resize_selection)
+                local width, height = resize_selection.data.width or 0, resize_selection.data.height or 0
+                local rotation = math.rad(resize_selection.data.rotation or 0)
+                local opposite_x = (resize_corner == "nw" or resize_corner == "sw") and width or 0
+                local opposite_y = (resize_corner == "nw" or resize_corner == "ne") and height or 0
+                self.object_drag = {
+                    selection = resize_selection,
+                    selections = {},
+                    resize = true,
+                    resize_corner = resize_corner,
+                    resize_cursor = self:getResizeCursor(resize_selection, resize_corner),
+                    fixed_x = object_x + opposite_x * math.cos(rotation) - opposite_y * math.sin(rotation),
+                    fixed_y = object_y + opposite_x * math.sin(rotation) + opposite_y * math.cos(rotation)
+                }
+                self.editor:beginHistoryTransaction("Resize Object", self.document)
+                return true
+            end
+        end
         local selection = self.document:findObjectAt(world_x, world_y)
         if selection then selection.view = self end
         if button == 2 then
@@ -319,7 +542,25 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             end
             return false
         end
-        if tool == "select" and self.editor.placement_event_id then
+        if tool == "object" and self.editor.placement_event_id then
+            local event_class = Registry.getEditorEvent(self.editor.placement_event_id)
+            if event_class and event_class.placement_shape == "region" then
+                local entry = self.document:getMapAt(world_x, world_y) or self.document:getPrimaryMap()
+                if not self.document:getSelectedObjectLayer(entry.id) then
+                    self.editor:addWarning("Select an object layer before placing an event",
+                        nil, "event_placement")
+                    return true
+                end
+                world_x, world_y = self:snapToMapGrid(entry, world_x, world_y)
+                self.event_region_drag = {
+                    event_id = self.editor.placement_event_id,
+                    map_id = entry.id,
+                    start_x = world_x, start_y = world_y,
+                    current_x = world_x, current_y = world_y
+                }
+                self.editor:beginHistoryTransaction("Place Event Region", self.document)
+                return true
+            end
             return self.editor:placeEvent(self, self.editor.placement_event_id, world_x, world_y)
         elseif tool == "shape" and self.editor.shape_mode ~= "point"
             and self.editor.shape_mode ~= "polygon" then
@@ -347,17 +588,30 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             self.editor:commitHistoryTransaction()
             return true
         elseif tool == "shape" and self.editor.shape_mode == "polygon" then
-            local entry = self.document:getMapAt(world_x, world_y) or self.document:getPrimaryMap()
-            if not Input.ctrl() then
-                world_x = MathUtils.round(world_x / (entry.tile_width or 40)) * (entry.tile_width or 40)
-                world_y = MathUtils.round(world_y / (entry.tile_height or 40)) * (entry.tile_height or 40)
-            end
-            if not self.polygon_build then
-                self.polygon_build = { map_id = entry.id, points = {} }
+            local build = self.polygon_build
+            local entry = build and self.document.map_lookup[build.map_id]
+                or self.document:getMapAt(world_x, world_y) or self.document:getPrimaryMap()
+            if not build then
+                if not self.document:getSelectedObjectLayer(entry.id) then
+                    self.editor:addWarning("Select an object layer before creating a polygon",
+                        nil, "shape_placement")
+                    return true
+                end
+                build = { map_id = entry.id, points = {} }
+                self.polygon_build = build
                 self.editor:beginHistoryTransaction("Create Polygon", self.document)
             end
-            table.insert(self.polygon_build.points, { x = world_x, y = world_y })
             if presses and presses >= 2 then return self:finishPolygon() end
+            world_x, world_y = self:snapToMapGrid(entry, world_x, world_y)
+            local first = build.points[1]
+            local close_distance = 9 / self.view_zoom
+            if #build.points >= 3 and first
+                and math.abs(world_x - first.x) <= close_distance
+                and math.abs(world_y - first.y) <= close_distance then
+                return self:finishPolygon()
+            end
+            local point = { x = world_x, y = world_y }
+            if not pointsEqual(build.points[#build.points], point) then table.insert(build.points, point) end
             return true
         elseif tool == "eraser" then
             self.editor:selectMapObject(selection)
@@ -371,16 +625,6 @@ function EditorMapView:onMousePressed(x, y, button, presses)
                 self.editor:selectMapObject(selection)
             end
             local selections = self.editor:getSelectedMapObjects(self.document)
-            local object_x, object_y = self.document:getObjectWorldPosition(selection)
-            local width, height = selection.data.width or 0, selection.data.height or 0
-            local rotation = -math.rad(selection.data.rotation or 0)
-            local dx, dy = world_x - object_x, world_y - object_y
-            local local_x = dx * math.cos(rotation) - dy * math.sin(rotation)
-            local local_y = dx * math.sin(rotation) + dy * math.cos(rotation)
-            local handle_distance = 10 / self.view_zoom
-            local resize = #selections == 1 and (width ~= 0 or height ~= 0)
-                and math.abs(local_x - width) <= handle_distance
-                and math.abs(local_y - height) <= handle_distance
             local snapshots = {}
             for _, selected in ipairs(selections) do
                 table.insert(snapshots, {
@@ -394,7 +638,7 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             self.object_drag = {
                 selection = selection,
                 selections = snapshots,
-                resize = resize,
+                resize = false,
                 start_x = world_x,
                 start_y = world_y,
                 object_x = selection.data.x or 0,
@@ -402,7 +646,7 @@ function EditorMapView:onMousePressed(x, y, button, presses)
                 width = selection.data.width or 0,
                 height = selection.data.height or 0
             }
-            self.editor:beginHistoryTransaction(resize and "Resize Object" or "Move Objects", self.document)
+            self.editor:beginHistoryTransaction("Move Objects", self.document)
             return true
         end
         if not selection and tool == "select" then
@@ -425,7 +669,7 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             }
             return true
         end
-        if tool == "select" or tool == "link" then return true end
+        if tool == "select" or tool == "object" or tool == "link" then return true end
     end
     return super.onMousePressed(self, x, y, button, presses)
 end
@@ -436,7 +680,23 @@ function EditorMapView:onMouseMoved(x, y, dx, dy)
     end
     local world_x, world_y = self:getMapCoordinates(x, y)
     if self.polygon_build then
+        local entry = self.document.map_lookup[self.polygon_build.map_id]
+        if entry then world_x, world_y = self:snapToMapGrid(entry, world_x, world_y) end
         self.polygon_build.current_x, self.polygon_build.current_y = world_x, world_y
+        return true
+    end
+    if self.polygon_vertex_drag then
+        local drag = self.polygon_vertex_drag
+        world_x, world_y = self:snapToMapGrid(drag.selection.entry, world_x, world_y)
+        if self.document:setPolygonWorldPoint(drag.selection, drag.index, world_x, world_y) then
+            self.editor:markHistoryChanged()
+        end
+        return true
+    end
+    if self.event_region_drag then
+        local entry = self.document.map_lookup[self.event_region_drag.map_id]
+        if entry then world_x, world_y = self:snapToMapGrid(entry, world_x, world_y) end
+        self.event_region_drag.current_x, self.event_region_drag.current_y = world_x, world_y
         return true
     end
     if self.shape_drag then
@@ -476,16 +736,29 @@ function EditorMapView:onMouseMoved(x, y, dx, dy)
     if self.object_drag then
         local drag = self.object_drag
         local data = drag.selection.data
-        local delta_x, delta_y = world_x - drag.start_x, world_y - drag.start_y
         local tile_width = drag.selection.entry.tile_width or 40
         local tile_height = drag.selection.entry.tile_height or 40
         local function snap(value, size)
             return Input.ctrl() and value or MathUtils.round(value / size) * size
         end
         if drag.resize then
-            data.width = math.max(0, snap(drag.width + delta_x, tile_width))
-            data.height = math.max(0, snap(drag.height + delta_y, tile_height))
+            local rotation = math.rad(data.rotation or 0)
+            local inverse = -rotation
+            local relative_x, relative_y = world_x - drag.fixed_x, world_y - drag.fixed_y
+            local local_x = relative_x * math.cos(inverse) - relative_y * math.sin(inverse)
+            local local_y = relative_x * math.sin(inverse) + relative_y * math.cos(inverse)
+            local right = drag.resize_corner == "ne" or drag.resize_corner == "se"
+            local bottom = drag.resize_corner == "sw" or drag.resize_corner == "se"
+            data.width = math.max(0, snap(right and local_x or -local_x, tile_width))
+            data.height = math.max(0, snap(bottom and local_y or -local_y, tile_height))
+            local opposite_x = right and 0 or data.width
+            local opposite_y = bottom and 0 or data.height
+            local origin_x = drag.fixed_x - opposite_x * math.cos(rotation) + opposite_y * math.sin(rotation)
+            local origin_y = drag.fixed_y - opposite_x * math.sin(rotation) - opposite_y * math.cos(rotation)
+            data.x = origin_x - drag.selection.entry.x - (drag.selection.layer.offsetx or 0)
+            data.y = origin_y - drag.selection.entry.y - (drag.selection.layer.offsety or 0)
         else
+            local delta_x, delta_y = world_x - drag.start_x, world_y - drag.start_y
             if not Input.ctrl() then
                 delta_x = MathUtils.round(delta_x / tile_width) * tile_width
                 delta_y = MathUtils.round(delta_y / tile_height) * tile_height
@@ -522,6 +795,26 @@ function EditorMapView:onMouseReleased(x, y, button, presses)
     if self.editor and self.editor.live_document == self.document then
         return self.editor.game_preview:onMouseReleased(x, y, button, presses)
     end
+    if button == 1 and self.event_region_drag then
+        local drag = self.event_region_drag
+        self.event_region_drag = nil
+        local x1, y1 = math.min(drag.start_x, drag.current_x), math.min(drag.start_y, drag.current_y)
+        local x2, y2 = math.max(drag.start_x, drag.current_x), math.max(drag.start_y, drag.current_y)
+        local object, layer_or_reason, map_id = self.document:addEditorRegion(
+            drag.event_id, drag.map_id, x1, y1, x2 - x1, y2 - y1)
+        if not object then
+            self.editor:cancelHistoryTransaction()
+            self.editor:addWarning(layer_or_reason, nil, "event_placement")
+            return true
+        end
+        local selection = self.document:getObjectSelection(map_id, layer_or_reason, object)
+        selection.view = self
+        self.editor:selectMapObject(selection)
+        self.editor:clearDiagnostics("event_placement")
+        self.editor:markHistoryChanged()
+        self.editor:commitHistoryTransaction()
+        return true
+    end
     if button == 1 and self.shape_drag then
         local drag = self.shape_drag
         self.shape_drag = nil
@@ -550,6 +843,13 @@ function EditorMapView:onMouseReleased(x, y, button, presses)
         self.object_drag = nil
         self.editor:commitHistoryTransaction()
         self.editor:selectMapObjects(self.editor:getSelectedMapObjects(), self.editor.selected_map_object)
+        return true
+    end
+    if button == 1 and self.polygon_vertex_drag then
+        local drag = self.polygon_vertex_drag
+        self.polygon_vertex_drag = nil
+        self.editor:commitHistoryTransaction()
+        self.editor:selectMapObjects({ drag.selection }, drag.selection)
         return true
     end
     if button == 1 and self.rotation_drag then
@@ -593,33 +893,27 @@ function EditorMapView:getCursorType(x, y)
     if self.editor and self.editor.live_document == self.document then
         return self.editor.game_preview:getCursorType(x, y)
     end
-    if self.object_drag or self.map_drag or self.dragging_canvas then return "grab" end
+    if self.object_drag then return self.object_drag.resize_cursor or "grab" end
+    if self.map_drag or self.dragging_canvas then return "grab" end
+    if self.polygon_vertex_drag then return "resize_all" end
     if self.rotation_drag then return "resize_all" end
     if self.editor and self.editor.active_tool == "link" then return "link" end
-    if self.editor and (self.editor.placement_event_id or self.editor.active_tool == "shape") then
+    if self.editor and (self.editor.active_tool == "object" or self.editor.active_tool == "shape") then
         return "crosshair"
     end
     local world_x, world_y = self:getMapCoordinates(x, y)
+    if self.editor and self.editor.active_tool == "select" then
+        local resize_selection, resize_corner = self:getSelectedResizeCornerAt(world_x, world_y)
+        if resize_selection then return self:getResizeCursor(resize_selection, resize_corner) end
+    end
+    if self.editor and self.editor.active_tool == "select" and self:getPolygonVertexAt(world_x, world_y) then
+        return "resize_all"
+    end
     if self.editor and self.editor.active_tool == "select" and self:isRotationHandleAt(world_x, world_y) then
         return "resize_all"
     end
     local selection = self.document:findObjectAt(world_x, world_y)
     if selection then
-        local selected = self.editor and self.editor.selected_map_object
-        local selections = self.editor and self.editor:getSelectedMapObjects(self.document) or {}
-        if #selections == 1 and selected and selected.data == selection.data then
-            local object_x, object_y = self.document:getObjectWorldPosition(selection)
-            local width, height = selection.data.width or 0, selection.data.height or 0
-            local rotation = -math.rad(selection.data.rotation or 0)
-            local dx, dy = world_x - object_x, world_y - object_y
-            local local_x = dx * math.cos(rotation) - dy * math.sin(rotation)
-            local local_y = dx * math.sin(rotation) + dy * math.cos(rotation)
-            local distance = 10 / self.view_zoom
-            if (width ~= 0 or height ~= 0) and math.abs(local_x - width) <= distance
-                and math.abs(local_y - height) <= distance then
-                return "resize_diag_l"
-            end
-        end
         return "select"
     end
     return super.getCursorType(self, x, y)
@@ -627,13 +921,17 @@ end
 
 function EditorMapView:onKeyPressed(key, is_repeat)
     if not is_repeat and key == "escape" and self.editor and self.editor.placement_event_id then
-        self.editor.placement_event_id = nil
+        self:cancelEventRegion()
+        self.editor:setActiveTool("select")
         return true
     end
     if not is_repeat and self.polygon_build then
         if key == "escape" then
-            self.polygon_build = nil
-            self.editor:cancelHistoryTransaction()
+            return self:cancelPolygon()
+        end
+        if key == "backspace" then
+            table.remove(self.polygon_build.points)
+            if #self.polygon_build.points == 0 then return self:cancelPolygon() end
             return true
         end
         if key == "return" or key == "kpenter" then return self:finishPolygon() end

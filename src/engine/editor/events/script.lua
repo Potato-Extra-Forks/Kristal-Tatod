@@ -1,5 +1,7 @@
 local EditorScriptEvent, super = Class(EditorEvent)
 
+EditorScriptEvent.placement_shape = "region"
+
 function EditorScriptEvent:init(data, options)
     super.init(self, data, options)
     self:registerProperty("cutscene", "string")

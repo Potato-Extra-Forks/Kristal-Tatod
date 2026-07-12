@@ -65,6 +65,13 @@ function EditorHistory:markChanged()
     return true
 end
 
+function EditorHistory:setTransactionMetadata(key, value)
+    if not self.transaction then return false end
+    self.transaction.metadata = self.transaction.metadata or {}
+    self.transaction.metadata[key] = value
+    return true
+end
+
 function EditorHistory:cancel()
     self.transaction = nil
 end
@@ -121,7 +128,7 @@ function EditorHistory:undo()
     local command = self.commands[self.index]
     restore(command, command.before, command.before_revisions)
     self.index = self.index - 1
-    self.editor:onHistoryChanged(command.owners, true)
+    self.editor:onHistoryChanged(command.owners, true, command, "undo")
     return true
 end
 
@@ -130,7 +137,7 @@ function EditorHistory:redo()
     local command = self.commands[self.index + 1]
     restore(command, command.after, command.after_revisions)
     self.index = self.index + 1
-    self.editor:onHistoryChanged(command.owners, true)
+    self.editor:onHistoryChanged(command.owners, true, command, "redo")
     return true
 end
 

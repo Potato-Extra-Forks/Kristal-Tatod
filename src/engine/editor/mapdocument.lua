@@ -330,17 +330,55 @@ function EditorMapDocument:addEditorObject(event_id, map_id, world_x, world_y)
     local tile_width, tile_height = entry.tile_width or 40, entry.tile_height or 40
     local local_x = world_x - entry.x - (layer.offsetx or 0)
     local local_y = world_y - entry.y - (layer.offsety or 0)
-    if not free then
-        local_x = MathUtils.round(local_x / tile_width) * tile_width
-        local_y = MathUtils.round(local_y / tile_height) * tile_height
+    local event_class = Registry.getEditorEvent(event_id)
+    local point = event_class and event_class.placement_shape == "point"
+    local shape = point and "point" or "rectangle"
+    if point then
+        if not free then
+            local_x = MathUtils.round(local_x / tile_width) * tile_width
+            local_y = MathUtils.round(local_y / tile_height) * tile_height
+        end
+    elseif free then
+        local_x = local_x - tile_width / 2
+        local_y = local_y - tile_height / 2
+    else
+        local_x = math.floor(local_x / tile_width) * tile_width
+        local_y = math.floor(local_y / tile_height) * tile_height
     end
     local object = {
         type = event_id,
         name = event_id,
+        shape = shape,
         x = local_x,
         y = local_y,
-        width = 0,
-        height = 0,
+        width = point and 0 or tile_width,
+        height = point and 0 or tile_height,
+        visible = true,
+        properties = {},
+        __editor_property_types = {}
+    }
+    self:getObjectId(object)
+    layer.objects = layer.objects or {}
+    table.insert(layer.objects, object)
+    self:invalidatePreview(map_id)
+    return object, layer, map_id
+end
+
+function EditorMapDocument:addEditorRegion(event_id, map_id, world_x, world_y, width, height)
+    local positioned_entry = self:getMapAt(world_x, world_y)
+    map_id = map_id or (positioned_entry and positioned_entry.id) or self.primary_map_id
+    local entry = self.map_lookup[map_id]
+    local layer = self:getSelectedObjectLayer(map_id)
+    if not entry or not layer then return nil, "Select an object layer before placing an event" end
+    if width <= 0 or height <= 0 then return nil, "Drag a region with a non-zero width and height" end
+    local object = {
+        type = event_id,
+        name = event_id,
+        shape = "rectangle",
+        x = world_x - entry.x - (layer.offsetx or 0),
+        y = world_y - entry.y - (layer.offsety or 0),
+        width = width,
+        height = height,
         visible = true,
         properties = {},
         __editor_property_types = {}
@@ -446,6 +484,142 @@ function EditorMapDocument:getObjectSelection(map_id, layer, object)
         data = object,
         object_id = self:getObjectId(object)
     }
+end
+
+function EditorMapDocument:getObjectShape(selection)
+    local data = selection and selection.data or {}
+    if data.shape == "point" or data.point == true then return "point" end
+    if data.polygon then return "polygon" end
+    if data.polyline then return "line" end
+    if data.shape == "ellipse" or data.ellipse == true then return "ellipse" end
+    return "rectangle"
+end
+
+function EditorMapDocument:getPolygonWorldPoint(selection, index)
+    local point = selection and selection.data and selection.data.polygon
+        and selection.data.polygon[index]
+    if not point then return nil end
+    local origin_x, origin_y = self:getObjectWorldPosition(selection)
+    local rotation = math.rad(selection.data.rotation or 0)
+    local x, y = point.x or point[1] or 0, point.y or point[2] or 0
+    return origin_x + x * math.cos(rotation) - y * math.sin(rotation),
+        origin_y + x * math.sin(rotation) + y * math.cos(rotation)
+end
+
+function EditorMapDocument:normalizePolygon(selection)
+    local data = selection and selection.data
+    local points = data and data.polygon
+    if not points or #points == 0 then return false end
+    local min_x, min_y, max_x, max_y
+    for _, point in ipairs(points) do
+        local x, y = point.x or point[1] or 0, point.y or point[2] or 0
+        min_x, min_y = min_x and math.min(min_x, x) or x, min_y and math.min(min_y, y) or y
+        max_x, max_y = max_x and math.max(max_x, x) or x, max_y and math.max(max_y, y) or y
+    end
+    if min_x ~= 0 or min_y ~= 0 then
+        local rotation = math.rad(data.rotation or 0)
+        data.x = (data.x or 0) + min_x * math.cos(rotation) - min_y * math.sin(rotation)
+        data.y = (data.y or 0) + min_x * math.sin(rotation) + min_y * math.cos(rotation)
+        for _, point in ipairs(points) do
+            point.x = (point.x or point[1] or 0) - min_x
+            point.y = (point.y or point[2] or 0) - min_y
+            point[1], point[2] = nil, nil
+        end
+        max_x, max_y = max_x - min_x, max_y - min_y
+    end
+    data.width, data.height = max_x, max_y
+    return true
+end
+
+function EditorMapDocument:setPolygonWorldPoint(selection, index, world_x, world_y)
+    if not selection or selection.document ~= self or not selection.data.polygon
+        or not selection.data.polygon[index] then return false end
+    local origin_x, origin_y = self:getObjectWorldPosition(selection)
+    local rotation = -math.rad(selection.data.rotation or 0)
+    local dx, dy = world_x - origin_x, world_y - origin_y
+    local point = selection.data.polygon[index]
+    point.x = dx * math.cos(rotation) - dy * math.sin(rotation)
+    point.y = dx * math.sin(rotation) + dy * math.cos(rotation)
+    point[1], point[2] = nil, nil
+    self:normalizePolygon(selection)
+    self:invalidatePreview(selection.map_id)
+    return true
+end
+
+function EditorMapDocument:insertPolygonWorldPoint(selection, after_index, world_x, world_y)
+    if not selection or selection.document ~= self or not selection.data.polygon
+        or not selection.data.polygon[after_index] then return false end
+    local origin_x, origin_y = self:getObjectWorldPosition(selection)
+    local rotation = -math.rad(selection.data.rotation or 0)
+    local dx, dy = world_x - origin_x, world_y - origin_y
+    table.insert(selection.data.polygon, after_index + 1, {
+        x = dx * math.cos(rotation) - dy * math.sin(rotation),
+        y = dx * math.sin(rotation) + dy * math.cos(rotation)
+    })
+    self:normalizePolygon(selection)
+    self:invalidatePreview(selection.map_id)
+    return after_index + 1
+end
+
+function EditorMapDocument:removePolygonPoint(selection, index)
+    if not selection or selection.document ~= self or not selection.data.polygon
+        or #selection.data.polygon <= 3 or not selection.data.polygon[index] then return false end
+    table.remove(selection.data.polygon, index)
+    self:normalizePolygon(selection)
+    self:invalidatePreview(selection.map_id)
+    return true
+end
+
+function EditorMapDocument:setObjectShape(selection, shape)
+    if not selection or selection.document ~= self then return false end
+    if shape ~= "point" and shape ~= "rectangle" and shape ~= "ellipse"
+        and shape ~= "line" and shape ~= "polygon" then return false end
+    local data = selection.data
+    local previous_shape = self:getObjectShape(selection)
+    if previous_shape == shape and data.shape == shape then return false end
+    local tile_width = selection.entry and selection.entry.tile_width or 40
+    local tile_height = selection.entry and selection.entry.tile_height or 40
+    local previous_width, previous_height = data.width or 0, data.height or 0
+    local rotation = math.rad(data.rotation or 0)
+    if shape == "point" and previous_shape ~= "point" then
+        data.x = (data.x or 0) + previous_width / 2 * math.cos(rotation)
+            - previous_height / 2 * math.sin(rotation)
+        data.y = (data.y or 0) + previous_width / 2 * math.sin(rotation)
+            + previous_height / 2 * math.cos(rotation)
+    end
+    data.shape = shape
+    data.point, data.ellipse = nil, nil
+    if shape == "point" then
+        data.width, data.height = 0, 0
+        data.polygon, data.polyline = nil, nil
+    else
+        if (data.width or 0) <= 0 then data.width = tile_width end
+        if (data.height or 0) <= 0 then data.height = tile_height end
+        if previous_shape == "point" then
+            data.x = (data.x or 0) - data.width / 2 * math.cos(rotation)
+                + data.height / 2 * math.sin(rotation)
+            data.y = (data.y or 0) - data.width / 2 * math.sin(rotation)
+                - data.height / 2 * math.cos(rotation)
+        end
+        if shape == "line" then
+            if previous_shape ~= "line" or not data.polyline then
+                data.polyline = { { x = 0, y = 0 }, { x = data.width, y = data.height } }
+            end
+            data.polygon = nil
+        elseif shape == "polygon" then
+            if previous_shape ~= "polygon" or not data.polygon then
+                data.polygon = {
+                    { x = 0, y = 0 }, { x = data.width, y = 0 },
+                    { x = data.width, y = data.height }, { x = 0, y = data.height }
+                }
+            end
+            data.polyline = nil
+        else
+            data.polygon, data.polyline = nil, nil
+        end
+    end
+    self:invalidatePreview(selection.map_id)
+    return true
 end
 
 function EditorMapDocument:findObjectAt(world_x, world_y)

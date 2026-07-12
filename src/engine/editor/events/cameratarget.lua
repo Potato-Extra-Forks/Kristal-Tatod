@@ -1,4 +1,5 @@
 local EditorCameraTarget, super = Class(EditorEvent)
+EditorCameraTarget.placement_shape = "region"
 function EditorCameraTarget:init(data, options)
     super.init(self, data, options)
     self:registerProperty("x", "number")

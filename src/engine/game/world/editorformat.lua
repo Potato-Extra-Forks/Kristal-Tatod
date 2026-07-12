@@ -9,6 +9,7 @@ local EditorFormat = {}
 EditorFormat.DESIGNED = false
 EditorFormat.MAP_FORMAT_VERSION = 1
 EditorFormat.TILESET_FORMAT_VERSION = 1
+EditorFormat.WORLD_FORMAT_VERSION = 1
 
 -- Map and Tileset methods callback format specific helpers through these tables.
 EditorFormat.mapOperations = {}
@@ -41,7 +42,8 @@ EditorFormat.ORDERING = {
         "background_color",
         "parallax_origin_x",
         "parallax_origin_y",
-        "layers"
+        "layers",
+        "properties"
     },
     tileset = {
         "version",
@@ -57,6 +59,7 @@ EditorFormat.ORDERING = {
         "tile_rows",
         "tile_columns",
         "spacing",
+        "margin",
         "alignment",
         "render_size",
         "fill_mode",
@@ -77,6 +80,8 @@ EditorFormat.ORDERING = {
         "can_vflip",
         "can_hflip",
         "can_rotate",
+        "prefer_untransformed",
+        "probability",
         "collision",
         "frames",
         "properties",
@@ -84,21 +89,33 @@ EditorFormat.ORDERING = {
     layer = {
         "id",
         "name",
+        "color",
         "x",
         "y",
         "type",
         "kind",
         "depth",
+        "alpha",
+        "visible",
+        "parallax_x",
+        "parallax_y",
         "tile_width_override",
         "tile_height_override",
         "properties"
         --- extra kind specific info here
     },
     world = {
+        "version",
+        "kristal_version",
         "id",
         "name",
-        "maps"
-        --- this might need more info?
+        "maps",
+        "properties"
+    },
+    world_map = {
+        "map",
+        "x",
+        "y"
     },
     terrain = {
         "id",
@@ -118,15 +135,21 @@ EditorFormat.ORDERING = {
         "width",
         "height",
         "rotation",
+        "shape",
         "scale_x",
         "scale_y",
         "origin_x",
         "origin_y",
         "alpha",
         "visible",
+        "fx",
         "tileset", --- For tile objects
         "tile_id", --- --^
         "properties"
+    },
+    shape = {
+        "type",
+        "shape_data" --- table value- points for polygons, bounds for boxes, radius for circles etc
     },
     terrain_variant = {
         "id",
@@ -139,6 +162,52 @@ EditorFormat.ORDERING = {
     terrain_tile = {
         "tile_id",
         "edges" -- 8 size table
+    },
+    frame = {
+        "tile_id",
+        "duration"
+    },
+    fx = {
+        "type",
+        "properties"
+    },
+    property = {
+        "name",
+        "type",
+        "value"
+    }
+}
+
+--- shape_data stuff. x/y is offset from object position. points and such are in local coordinates around shape center.
+EditorFormat.SHAPE_DATA_TYPES = {
+    point = {
+        "x",
+        "y"
+    },
+    line = {
+        "x",
+        "y",
+        "points",
+        "thickness"
+    },
+    rectangle = {
+        "x",
+        "y",
+        "bounds",
+        "rotation"
+    },
+    ellipse = {
+        "x",
+        "y",
+        "radius_x", -- collapses into just one 'radius' value for a circle
+        "radius_y", -- ^^^
+        "rotation"
+    },
+    polygon = {
+        "x",
+        "y",
+        "points",
+        "rotation"
     }
 }
 

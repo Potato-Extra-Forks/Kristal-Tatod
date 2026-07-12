@@ -227,21 +227,51 @@ function EditorPropertiesPanel:rebuild()
             local changed = field.set(value, submitted) ~= false
             if changed then self:notifyChanged("standard") end
             self:finishTargetHistory(changed)
+            if changed and field.rebuild then self:rebuild() end
             return changed
         end
-        local input = self:addGeneratedControl(EditorTextInput({
-            placeholder = field.placeholder,
-            multiline = field.multiline == true,
-            on_changed = field.live and function(value)
-                setField(value, false)
-            end or nil,
-            on_submit = function(value)
-                setField(value, true)
-            end
-        }))
-        input:setValue(displayValue(field.get()), true)
-        input.enabled = field.readonly ~= true
-        table.insert(self.layout_rows, { kind = "standard", label = field.label, controls = { input }, value_control = input })
+        local value_control
+        if field.choices then
+            local button
+            button = self:addGeneratedControl(EditorButton(displayValue(field.get()), function()
+                local items = {}
+                for _, choice in ipairs(field.choices) do
+                    local choice_value = type(choice) == "table"
+                        and (choice.value ~= nil and choice.value or choice.id) or choice
+                    local choice_label = type(choice) == "table"
+                        and (choice.label or choice.name or choice_value) or choice
+                    table.insert(items, {
+                        label = tostring(choice_label),
+                        checked = choice_value == field.get(),
+                        action = function()
+                            if setField(choice_value, true) then button.label = displayValue(choice_label) end
+                        end
+                    })
+                end
+                local x, y = button:getGlobalPosition()
+                self.editor.dockspace:openContextMenu(items, x, y + button.height, button)
+            end))
+            button.enabled = field.readonly ~= true
+            value_control = button
+        else
+            local input = self:addGeneratedControl(EditorTextInput({
+                placeholder = field.placeholder,
+                multiline = field.multiline == true,
+                on_changed = field.live and function(value)
+                    setField(value, false)
+                end or nil,
+                on_submit = function(value)
+                    setField(value, true)
+                end
+            }))
+            input:setValue(displayValue(field.get()), true)
+            input.enabled = field.readonly ~= true
+            value_control = input
+        end
+        table.insert(self.layout_rows, {
+            kind = "standard", label = field.label,
+            controls = { value_control }, value_control = value_control
+        })
     end
 
     local definitions, included = self:getSchema(), {}

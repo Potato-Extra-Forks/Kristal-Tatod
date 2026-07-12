@@ -1,6 +1,7 @@
 local EditorTransition, super = Class(EditorEvent)
 
 EditorTransition.editor_sprite = "editor/transition"
+EditorTransition.placement_shape = "region"
 function EditorTransition:init(data, options)
     super.init(self, data, options)
     self:registerProperty("map", "string")

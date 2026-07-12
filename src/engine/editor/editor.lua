@@ -342,12 +342,16 @@ end
 function Editor:registerEditorTools()
     self.tool_registry = EditorToolRegistry()
     self.tool_registry:register("select", { name = "Select", icon = "editor/ui/tool/select" })
+    self.tool_registry:register("object", {
+        name = "Add Object", short_name = "Object", icon = "editor/ui/tool/shape_point"
+    })
     self.tool_registry:register("shape", { name = "Shape", icon = "editor/ui/tool/shape_rect" })
     self.tool_registry:register("tile_brush", { name = "Tile Brush", short_name = "Brush", icon = "editor/ui/tool/brush" })
     self.tool_registry:register("tile_fill", { name = "Tile Fill", short_name = "Fill", icon = "editor/ui/tool/bucket" })
     self.tool_registry:register("eraser", { name = "Eraser", icon = "editor/ui/tool/eraser" })
     self.tool_registry:register("link", { name = "Link Objects", short_name = "Link", icon = "editor/ui/tool/link" })
     self.active_tool = "select"
+    self.selected_event_id = nil
     self.shape_mode = "rectangle"
 end
 
@@ -484,6 +488,7 @@ end
 function Editor:setShapeMode(mode)
     local modes = { point = true, line = true, rectangle = true, ellipse = true, polygon = true }
     if not modes[mode] then return false end
+    if mode ~= "polygon" then self:cancelPolygonBuilds() end
     self.shape_mode = mode
     self:setActiveTool("shape")
     return true
@@ -854,6 +859,7 @@ function Editor:leave()
     self.toolbar_panel = nil
     self.tool_registry = nil
     self.active_tool = nil
+    self.selected_event_id = nil
     self.placement_event_id = nil
     self.diagnostics_browser = nil
     self.diagnostics_panel = nil
@@ -980,9 +986,33 @@ end
 
 function Editor:setActiveTool(id)
     if not self.tool_registry:get(id) then return false end
+    if id ~= "shape" then self:cancelPolygonBuilds() end
+    if id ~= "object" then self:cancelEventRegionDrags() end
     self.active_tool = id
-    self.placement_event_id = nil
+    self.placement_event_id = id == "object" and self.selected_event_id or nil
     return true
+end
+
+function Editor:cancelPolygonBuilds()
+    local cancelled = false
+    for _, document in ipairs(self.map_documents or {}) do
+        if document.map_view and document.map_view.polygon_build then
+            document.map_view:cancelPolygon()
+            cancelled = true
+        end
+    end
+    return cancelled
+end
+
+function Editor:cancelEventRegionDrags()
+    local cancelled = false
+    for _, document in ipairs(self.map_documents or {}) do
+        if document.map_view and document.map_view.event_region_drag then
+            document.map_view:cancelEventRegion()
+            cancelled = true
+        end
+    end
+    return cancelled
 end
 
 function Editor:beginHistoryTransaction(label, owners)
@@ -991,6 +1021,10 @@ end
 
 function Editor:markHistoryChanged()
     return self.history and self.history:markChanged()
+end
+
+function Editor:setHistoryMetadata(key, value)
+    return self.history and self.history:setTransactionMetadata(key, value)
 end
 
 function Editor:commitHistoryTransaction()
@@ -1014,10 +1048,23 @@ function Editor:redo()
     return self.history and self.history:redo() or false
 end
 
-function Editor:onHistoryChanged(owners, restored)
+function Editor:onHistoryChanged(owners, restored, command, direction)
     self.discard_changes_confirmed = false
     self:clearDiagnostics("unsaved_exit")
     if restored then self:selectMapObjects({}) end
+    local explosions = command and command.metadata and command.metadata.explosions
+    if restored and explosions then
+        for _, explosion in ipairs(explosions) do
+            local view = explosion.document and explosion.document.map_view
+            if view then
+                if direction == "undo" then
+                    view:addUnexplosion(explosion.x, explosion.y)
+                elseif direction == "redo" then
+                    view:addExplosion(explosion.x, explosion.y)
+                end
+            end
+        end
+    end
     for _, owner in ipairs(owners or {}) do
         owner.discard_close_confirmed = false
         if owner.panel then
@@ -1066,8 +1113,11 @@ end
 
 function Editor:setPlacementEvent(id)
     if not Registry.getEditorEvent(id) then return false end
+    self:cancelPolygonBuilds()
+    self:cancelEventRegionDrags()
+    self.selected_event_id = id
     self.placement_event_id = id
-    self.active_tool = "select"
+    self.active_tool = "object"
     return true
 end
 
@@ -1082,8 +1132,14 @@ end
 function Editor:beginDragPreview(kind, label, icon, data)
     self.drag_preview = { kind = kind, label = label, icon = icon, data = data }
     if kind == "event" then
-        local success, event = pcall(Registry.createEditorEvent, data,
-            { x = 0, y = 0, properties = {} }, {})
+        local event_class = Registry.getEditorEvent(data)
+        local point = event_class and event_class.placement_shape == "point"
+        local shape = point and "point" or "rectangle"
+        local success, event = pcall(Registry.createEditorEvent, data, {
+            x = point and 0 or -20, y = point and 0 or -20, shape = shape,
+            width = point and 0 or 40, height = point and 0 or 40,
+            properties = {}
+        }, {})
         if success then self.drag_preview.event = event end
     end
     return true
@@ -1161,6 +1217,10 @@ function Editor:finishAssetDrag(x, y)
         self:selectMapObject(selection)
         return self:applyDrawFXToSelection(drag.id)
     elseif drag.kind == "event" and view then
+        local event_class = Registry.getEditorEvent(drag.id)
+        if event_class and event_class.placement_shape == "region" then
+            return self:setPlacementEvent(drag.id)
+        end
         return self:placeEvent(view, drag.id, world_x, world_y)
     end
     return false
@@ -1241,6 +1301,19 @@ function Editor:getMapObjectPropertiesTarget(selection)
         history_owner = selection.document,
         fields = {
             numberField("X", "x"), numberField("Y", "y"),
+            {
+                label = "Shape",
+                get = function() return selection.document:getObjectShape(selection) end,
+                set = function(shape) return selection.document:setObjectShape(selection, shape) end,
+                choices = {
+                    { value = "point", label = "Point" },
+                    { value = "rectangle", label = "Rectangle" },
+                    { value = "ellipse", label = "Ellipse" },
+                    { value = "line", label = "Line" },
+                    { value = "polygon", label = "Polygon" }
+                },
+                rebuild = true
+            },
             numberField("Width", "width"), numberField("Height", "height"),
             numberField("Rotation", "rotation"),
             {
@@ -1365,14 +1438,17 @@ function Editor:deleteSelectedMapObject(explode)
     for _, selection in ipairs(selections) do table.insert(owners, selection.document) end
     self:beginHistoryTransaction(explode and "Explode Objects" or "Delete Objects", owners)
     local removed = false
+    local explosions = {}
     for _, selection in ipairs(selections) do
         if explode and selection.view then
             local x, y = selection.document:getObjectWorldCenter(selection)
             selection.view:addExplosion(x, y)
+            table.insert(explosions, { document = selection.document, x = x, y = y })
         end
         removed = selection.document:removeEditorObject(selection) or removed
     end
     if removed then
+        if #explosions > 0 then self:setHistoryMetadata("explosions", explosions) end
         self:markHistoryChanged()
         self:commitHistoryTransaction()
         self:selectMapObjects({})
@@ -1905,6 +1981,10 @@ end
 function Editor:activateMapDocument(document, options)
     options = options or {}
     if not document then return false end
+    if self.active_document and self.active_document ~= document then
+        self:cancelPolygonBuilds()
+        self:cancelEventRegionDrags()
+    end
     if document.panel and not document.panel.visible then
         self.dockspace:setPanelVisible(document.panel, true, document.panel.last_region or "center")
     end
@@ -2307,7 +2387,7 @@ function Editor:onKeyPressed(key, is_repeat)
     end
     if key == "escape" and self.placement_event_id
         and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
-        self.placement_event_id = nil
+        self:setActiveTool("select")
         return true
     end
     if key == "space" and not is_repeat and self.live_document
@@ -2347,6 +2427,8 @@ function Editor:beginExitTransition()
             "unsaved_exit")
         return false
     end
+    self:cancelPolygonBuilds()
+    self:cancelEventRegionDrags()
     self:saveSession()
     self.session_saved_for_exit = true
     if self.live_document then

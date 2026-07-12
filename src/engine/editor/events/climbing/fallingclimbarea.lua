@@ -1,4 +1,5 @@
 local EditorFallingClimbArea, super = Class(EditorEvent)
+EditorFallingClimbArea.placement_shape = "region"
 function EditorFallingClimbArea:init(data, options)
     super.init(self, data, options)
     self:registerProperty("dont_break", "boolean", { name = "Don't Break" })

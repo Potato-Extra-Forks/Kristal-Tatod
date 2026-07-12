@@ -1,6 +1,12 @@
 ---@class EditorEvent : Class
+---@field placement_shape "rectangle"|"point"|"region"
 ---@overload fun(data?: table, options?: table): EditorEvent
 local EditorEvent = Class()
+
+-- Event classes may override this with "point" when their position has no
+-- bounded area, or "region" when placement should be defined by dragging.
+-- New rectangle event placements otherwise occupy one map-grid cell.
+EditorEvent.placement_shape = "rectangle"
 
 function EditorEvent:registerProperty(id, property_type, options)
     return self.property_set:registerProperty(id, property_type, options)

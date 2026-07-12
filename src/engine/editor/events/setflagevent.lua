@@ -1,4 +1,5 @@
 local EditorSetFlagEvent, super = Class(EditorEvent)
+EditorSetFlagEvent.placement_shape = "region"
 function EditorSetFlagEvent:init(data, options)
     super.init(self, data, options)
     self:registerProperty("flag", "string")
