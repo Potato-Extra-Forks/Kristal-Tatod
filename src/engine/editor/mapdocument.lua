@@ -643,10 +643,13 @@ end
 
 function EditorMapDocument:addPointShapeObject(shape, map_id, points)
     local minimum = shape == "polygon" and 3 or 2
-    if shape ~= "polygon" and shape ~= "polyline" then return nil, "Unsupported point shape" end
+    if shape ~= "line" and shape ~= "polygon" and shape ~= "polyline" then
+        return nil, "Unsupported point shape"
+    end
     if not points or #points < minimum then
         return nil, "A " .. shape .. " requires at least " .. minimum .. " points"
     end
+    if shape == "line" and #points > 2 then return nil, "A line requires exactly two points" end
     local positioned_entry = self:getMapAt(points[1].x, points[1].y)
     map_id = map_id or (positioned_entry and positioned_entry.id) or self.primary_map_id
     local entry = self.map_lookup[map_id]
@@ -668,9 +671,10 @@ function EditorMapDocument:addPointShapeObject(shape, map_id, points)
         properties = {},
         __editor_property_types = {}
     }
-    object[shape] = {}
+    local points_key = shape == "polygon" and "polygon" or "polyline"
+    object[points_key] = {}
     for _, point in ipairs(points) do
-        table.insert(object[shape], { x = point.x - min_x, y = point.y - min_y })
+        table.insert(object[points_key], { x = point.x - min_x, y = point.y - min_y })
     end
     if shape == "polyline" then
         object.shape_data = { edges = {} }
@@ -691,6 +695,10 @@ end
 
 function EditorMapDocument:addPolylineObject(map_id, points)
     return self:addPointShapeObject("polyline", map_id, points)
+end
+
+function EditorMapDocument:addLineObject(map_id, points)
+    return self:addPointShapeObject("line", map_id, points)
 end
 
 function EditorMapDocument:removeEditorObject(selection)
@@ -740,7 +748,8 @@ end
 function EditorMapDocument:getPointShape(selection)
     local data = selection and selection.data
     if not data then return nil end
-    return data.polygon or data.shape == "polyline" and data.polyline
+    return data.polygon
+        or (data.shape == "line" or data.shape == "polyline") and data.polyline
 end
 
 function EditorMapDocument:getPointShapeWorldPoint(selection, index)
@@ -797,6 +806,7 @@ end
 function EditorMapDocument:insertPointShapeWorldPoint(selection, after_index, world_x, world_y)
     local points = self:getPointShape(selection)
     if not selection or selection.document ~= self or not points or not points[after_index] then return false end
+    if selection.data.shape == "line" then return false end
     local origin_x, origin_y = self:getObjectWorldPosition(selection)
     local rotation = -math.rad(selection.data.rotation or 0)
     local dx, dy = world_x - origin_x, world_y - origin_y
