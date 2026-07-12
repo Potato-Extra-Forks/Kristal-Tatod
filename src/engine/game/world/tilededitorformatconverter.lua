@@ -170,6 +170,13 @@ function TiledEditorFormatConverter.convertMap(data, options)
     local converted_layers, reason = convertLayers(converted.layers)
     if not converted_layers then return nil, reason end
     converted.layers = converted_layers
+    if Registry.editor_events then
+        MapUtils.walkObjects(converted.layers, function(object)
+            local event_id = object.type or object.class
+            if event_id == nil or event_id == "" then event_id = object.name end
+            Registry.createEditorEvent(event_id, object, { map_id = converted.id })
+        end)
+    end
     return EditorFormat.migrateMap(converted)
 end
 

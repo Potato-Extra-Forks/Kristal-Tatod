@@ -20,6 +20,33 @@ function MapUtils.walkObjects(layers, callback)
     end)
 end
 
+function MapUtils.resolveMarkerReference(map_id, value)
+    local reference = EditorObjectReference.from(value, map_id)
+    map_id = reference.map_id or map_id
+    if reference.object_id == nil or type(reference.object_id) == "number" then return reference end
+    local data = Registry.getMapData(map_id)
+    if not data then return reference end
+    local marker_id = reference.object_id
+    MapUtils.walkLayers(data.layers, function(layer)
+        local marker_layer = layer._editor_type_id == "markers" or layer.type == "markers"
+            or tostring(layer.name or ""):lower() == "markers"
+        if not marker_layer and Registry.layer_types then
+            local layer_type = Registry.layer_types:getLegacyTiledType(layer)
+            marker_layer = layer_type and layer_type.id == "markers"
+        end
+        if marker_layer then
+            for _, object in ipairs(layer.objects or {}) do
+                if tostring(object.id) == tostring(reference.object_id)
+                    or tostring(object.name) == tostring(reference.object_id) then
+                    marker_id = object.id
+                    return false
+                end
+            end
+        end
+    end)
+    return EditorObjectReference(map_id, marker_id)
+end
+
 --- Unpacks the global tile id and transform flags used by runtime TileLayers.
 function MapUtils.unpackTileGid(id)
     return bit.band(id, 0x0FFFFFFF),
@@ -36,8 +63,13 @@ end
 ---@return number y
 ---@return Marker? data
 function MapUtils.parseMarkerProperty(obj, target, name)
-    if type(target) == "table" and target.object_id ~= nil then
-        target = target.object_id
+    if type(target) == "table" and (target.object_id ~= nil or target.object ~= nil) then
+        local target_map = target.map_id or target.map
+        if target_map and Game.world.map.id ~= target_map then
+            error(string.format("%s at (%d, %d) has cross-map position property \"%s\" targeting %s",
+                ClassUtils.getClassName(obj), obj.x, obj.y, name, tostring(target_map)))
+        end
+        target = target.object_id or target.object
     end
     if type(target) == "table" then
         if target.center_x ~= nil and target.center_y ~= nil then

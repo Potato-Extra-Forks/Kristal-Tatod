@@ -18,7 +18,9 @@ function EditorWarpDoor:init(data, options)
         choices = Registry.editor_properties:registryChoices({ "maps", "map_data" })
     })
     destinations:registerProperty("name", "string")
-    destinations:registerProperty("marker", "string")
+    destinations:registerProperty("marker", "object_reference", {
+        marker = true, target_map_property = "map", map_id = options.map_id
+    })
     destinations:registerProperty("flag", "string")
 end
 return EditorWarpDoor

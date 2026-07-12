@@ -136,6 +136,10 @@ function Map:getMarker(id)
     local marker
 
     if type(id) == "table" then
+        local map_id = id.map_id or id.map
+        if map_id and map_id ~= self.id then
+            return (self.width * self.tile_width / 2), (self.height * self.tile_height / 2), nil
+        end
         local object_id = id.object_id or id.object or id.id
         if object_id ~= nil then
             marker = self.markers_by_id[object_id]
@@ -157,6 +161,8 @@ end
 ---@param id string|integer|TiledObjectRef The name of the marker to search for, or the unique numerical ID.
 function Map:hasMarker(id)
     if type(id) == "table" then
+        local map_id = id.map_id or id.map
+        if map_id and map_id ~= self.id then return false end
         local object_id = id.object_id or id.object or id.id
         if object_id ~= nil then
             return self.markers_by_id[object_id] ~= nil

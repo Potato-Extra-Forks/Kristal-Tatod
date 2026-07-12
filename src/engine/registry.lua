@@ -538,6 +538,7 @@ function Registry.createEditorEvent(id, data, options)
     options.event_id = id
     local event = event_class(data, options)
     if EditorPlugins then EditorPlugins:initializeEditorEvent(event) end
+    event.property_set:normalizeObjectReferences(options.map_id)
     return event
 end
 

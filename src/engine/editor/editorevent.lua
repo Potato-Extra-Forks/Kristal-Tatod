@@ -8,6 +8,8 @@ local EditorEvent = Class()
 EditorEvent.placement_shape = "rectangle"
 
 function EditorEvent:registerProperty(id, property_type, options)
+    options = TableUtils.copy(options or {}, true)
+    if property_type == "object_reference" and options.map_id == nil then options.map_id = self.map_id end
     return self.property_set:registerProperty(id, property_type, options)
 end
 
@@ -18,6 +20,7 @@ end
 function EditorEvent:init(data, options)
     data = data or {}
     options = options or {}
+    self.map_id = options.map_id
     self.data = data
     data.properties = data.properties or {}
     data.__editor_property_types = data.__editor_property_types or {}

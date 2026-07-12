@@ -176,13 +176,21 @@ function EditorMapView:drawObjectLinks()
             drawDashedLine(x1, y1, x2, y2, 8 / self.view_zoom)
         end
     end
-    local selection = self.editor and self.editor.selected_map_object
-    local drag = self.editor and self.editor.object_reference_drag
-    if selection and selection.document == self.document and drag and drag.source == selection then
-        local x1, y1 = self.document:getObjectWorldCenter(selection)
+    local drag = self.editor and (self.editor.object_link or self.editor.object_reference_drag)
+    local source = drag and drag.source
+    if source and source.document == self.document then
+        local x1, y1 = self.document:getObjectWorldCenter(source)
         local mouse_x, mouse_y = love.mouse.getPosition()
         local local_x, local_y = self:toLocal(mouse_x, mouse_y)
         local x2, y2 = self:getMapCoordinates(local_x, local_y)
+        local target = self.document:findObjectAt(x2, y2)
+        if target and target.data ~= source.data then
+            x2, y2 = self.document:getObjectWorldCenter(target)
+            Draw.setColor(1, 0.84, 0.2, 0.95)
+            love.graphics.circle("line", x2, y2, 7 / self.view_zoom)
+        else
+            Draw.setColor(0.72, 0.82, 1, 0.8)
+        end
         drawDashedLine(x1, y1, x2, y2, 8 / self.view_zoom)
     end
 end
@@ -738,6 +746,24 @@ function EditorMapView:onMousePressed(x, y, button, presses)
     if button == 1 or button == 2 then
         local world_x, world_y = self:getMapCoordinates(x, y)
         local tool = self.editor.active_tool
+        if tool == "link" then
+            if button == 2 then
+                return self.editor:cancelObjectLink() or true
+            end
+            local selection = self.document:findObjectAt(world_x, world_y)
+            if selection then selection.view = self end
+            if self.editor.object_link then
+                return self.editor:finishObjectLink(selection)
+            end
+            if not selection then
+                if self.editor.message_bar then
+                    self.editor.message_bar:setStatus("Link Objects: click the source object first")
+                end
+                return true
+            end
+            local global_x, global_y = self:getGlobalPosition()
+            return self.editor:chooseObjectLink(selection, global_x + x, global_y + y)
+        end
         if tool == "world_select" then
             if button == 1 then
                 local entry = self.document:getMapAt(world_x, world_y)

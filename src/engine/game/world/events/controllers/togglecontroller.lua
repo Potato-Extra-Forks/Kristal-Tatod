@@ -29,13 +29,16 @@ function ToggleController:onLoad()
     self.targets = {}
     self.target_colliders = {}
     for _, obj in ipairs(self.target_objs) do
-        local target = self.world.map:getEvent(obj.id)
-        if target then
-            table.insert(self.targets, target)
-        else
-            local collider_target = self.world.map:getHitbox(obj.id)
-            if collider_target then
-                table.insert(self.target_colliders, collider_target)
+        local map_id = obj.map_id or obj.map
+        if not map_id or map_id == self.world.map.id then
+            local target = self.world.map:getEvent(obj.object_id or obj.object or obj.id)
+            if target then
+                table.insert(self.targets, target)
+            else
+                local collider_target = self.world.map:getHitbox(obj.object_id or obj.object or obj.id)
+                if collider_target then
+                    table.insert(self.target_colliders, collider_target)
+                end
             end
         end
     end

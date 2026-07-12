@@ -925,6 +925,7 @@ function Editor:leave()
     self.asset_drag = nil
     self.drag_preview = nil
     self.object_reference_drag = nil
+    self.object_link = nil
     self.selected_map_object = nil
     self.selected_map_objects = nil
     self.history = nil
@@ -1367,6 +1368,7 @@ function Editor:setActiveTool(id)
     if not self.tool_registry:get(id) then return false end
     if id ~= "shape" then self:cancelPolygonBuilds() end
     if id ~= "object" then self:cancelEventRegionDrags() end
+    if id ~= "link" then self:cancelObjectLink(true) end
     self.active_tool = id
     self.placement_event_id = id == "object" and self.selected_event_id or nil
     return true
@@ -1977,6 +1979,9 @@ function Editor:startObjectReferenceDrag(control)
         return false
     end
     self.object_reference_drag = { control = control, source = self.selected_map_object }
+    if self.message_bar then
+        self.message_bar:setStatus("Linking object reference: drop onto a target object (Esc to cancel)", 3600)
+    end
     return true
 end
 
@@ -1990,7 +1995,103 @@ function Editor:finishObjectReferenceDrag(x, y)
         return nil
     end
     self:clearDiagnostics("object_reference")
-    return selection.document:createObjectReference(selection)
+    if self.message_bar then self.message_bar:setStatus("Linked object reference") end
+    return drag.source.document:createObjectReference(selection)
+end
+
+function Editor:getObjectLinkProperties(selection)
+    if not selection or not selection.data then return {} end
+    local data = selection.data
+    data.properties = data.properties or {}
+    data.__editor_property_types = data.__editor_property_types or {}
+    local event_id = data.type or data.class
+    if event_id == nil or event_id == "" then event_id = data.name end
+    local success, event = pcall(Registry.createEditorEvent, event_id, data, {
+        map_id = selection.map_id
+    })
+    if not success or not event then return {} end
+    local result = {}
+    for _, definition in ipairs(event.property_set:getProperties()) do
+        if (definition.type == "object_reference" or definition.type == "marker_reference")
+            and not definition.unavailable then
+            table.insert(result, {
+                id = definition.id,
+                name = definition.name or StringUtils.titleCase(definition.id:gsub("_", " ")),
+                definition = definition,
+                property_set = event.property_set
+            })
+        end
+    end
+    return result
+end
+
+function Editor:startObjectLink(selection, property)
+    self.object_link = {
+        source = selection,
+        property_id = property.id,
+        property_name = property.name,
+        property_set = property.property_set
+    }
+    self:selectMapObject(selection)
+    self:clearDiagnostics("object_link")
+    if self.message_bar then
+        self.message_bar:setStatus("Linking " .. property.name .. ": click a target object (Esc to cancel)", 3600)
+    end
+    return true
+end
+
+function Editor:chooseObjectLink(selection, x, y)
+    local properties = self:getObjectLinkProperties(selection)
+    if #properties == 0 then
+        self:addWarning("This object has no object-reference properties to link", nil, "object_link")
+        return false
+    end
+    if #properties == 1 then return self:startObjectLink(selection, properties[1]) end
+    local items = {}
+    for _, property in ipairs(properties) do
+        local choice = property
+        table.insert(items, {
+            label = choice.name,
+            action = function() self:startObjectLink(selection, choice) end
+        })
+    end
+    self:selectMapObject(selection)
+    if self.message_bar then self.message_bar:setStatus("Choose which reference property to link") end
+    return self.dockspace:openContextMenu(items, x, y, selection.view)
+end
+
+function Editor:finishObjectLink(target)
+    local link = self.object_link
+    if not link then return false end
+    if not target then
+        if self.message_bar then
+            self.message_bar:setStatus("Linking " .. link.property_name .. ": click a target object (Esc to cancel)", 3600)
+        end
+        return true
+    end
+    if target.document == link.source.document and target.data == link.source.data then
+        if self.message_bar then self.message_bar:setStatus("The source cannot link to itself", 2.5) end
+        return true
+    end
+    local reference = link.source.document:createObjectReference(target)
+    local changed = self:performHistoryEdit("Link " .. link.property_name, link.source.document, function()
+        if not link.property_set:setValue(link.property_id, reference) then return false end
+        link.source.document:invalidatePreview(link.source.map_id)
+        return true
+    end)
+    if not changed then return false end
+    self.object_link = nil
+    self:selectMapObject(link.source)
+    self:clearDiagnostics("object_link")
+    if self.message_bar then self.message_bar:setStatus("Linked " .. link.property_name) end
+    return true
+end
+
+function Editor:cancelObjectLink(silent)
+    if not self.object_link then return false end
+    self.object_link = nil
+    if not silent and self.message_bar then self.message_bar:setStatus("Object link cancelled") end
+    return true
 end
 
 function Editor:recordGameError(phase, trace)
@@ -2934,8 +3035,10 @@ function Editor:onKeyPressed(key, is_repeat)
             end
         end
     end
-    if key == "escape" and (self.asset_drag or self.object_reference_drag or self.drag_preview) then
+    if key == "escape" and (self.asset_drag or self.object_reference_drag or self.object_link or self.drag_preview) then
+        local cancelled_link = self:cancelObjectLink()
         self.asset_drag, self.object_reference_drag, self.drag_preview = nil, nil, nil
+        if not cancelled_link and self.message_bar then self.message_bar:setStatus("Drag cancelled") end
         return true
     end
     if key == "escape" and self.placement_event_id

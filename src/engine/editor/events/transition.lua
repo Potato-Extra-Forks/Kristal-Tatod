@@ -10,7 +10,9 @@ function EditorTransition:init(data, options)
     self:registerProperty("shop", "string")
     self:registerProperty("x", "number")
     self:registerProperty("y", "number")
-    self:registerProperty("marker", "marker_reference")
+    self:registerProperty("marker", "object_reference", {
+        marker = true, target_map_property = "map"
+    })
     self:registerProperty("facing", "choice", { choices = { "up", "down", "left", "right" } })
     self:registerProperty("sound", "string")
     self:registerProperty("pitch", "number", { default = 1 })

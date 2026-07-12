@@ -78,6 +78,25 @@ function EditorPropertySet:setValue(id, value)
     return true
 end
 
+function EditorPropertySet:normalizeObjectReferences(default_map_id)
+    for _, definition in ipairs(self:getProperties()) do
+        if definition.type == "marker_reference" then definition.type = "object_reference" end
+        if definition.type == "object_reference" and self.values[definition.id] ~= nil then
+            local map_id = default_map_id
+            if definition.target_map_property then
+                local map_key = definition.target_map_property
+                if definition.group_index then map_key = map_key .. tostring(definition.group_index) end
+                map_id = self.values[map_key] or map_id
+            end
+            local reference = definition.marker
+                and MapUtils.resolveMarkerReference(map_id, self.values[definition.id])
+                or EditorObjectReference.from(self.values[definition.id], map_id)
+            self.values[definition.id] = reference
+            self.types[definition.id] = "object_reference"
+        end
+    end
+end
+
 function EditorPropertySet:addProperty(id, property_type, options)
     local definition = self:registerProperty(id, property_type, TableUtils.merge({ custom = true }, options or {}))
     self.values[id] = Registry.editor_properties:getDefault(definition.type, definition)

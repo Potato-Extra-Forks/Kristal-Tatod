@@ -97,9 +97,11 @@ function EditorPropertyRegistry:init()
             local reference = EditorObjectReference.from(value)
             return { map = reference.map_id, object = reference.object_id }
         end,
-        decode = function(value, definition)
+        decode = function(value, definition, context)
             if value == nil then return nil end
-            return EditorObjectReference.from(value, definition and definition.map_id)
+            local map_id = definition and definition.map_id
+                or context and context.map and context.map.id
+            return EditorObjectReference.from(value, map_id)
         end,
         coerce = function(value, definition)
             if value == nil or value == "" then return EditorObjectReference(definition and definition.map_id, nil) end
@@ -107,24 +109,11 @@ function EditorPropertyRegistry:init()
         end
     })
     self:registerType("marker_reference", {
-        name = "Marker Reference",
-        default = "",
-        control = "marker_reference",
-        encode = function(value)
-            if type(value) ~= "table" then return value end
-            local reference = EditorObjectReference.from(value)
-            return { map = reference.map_id, object = reference.object_id }
-        end,
-        decode = function(value, definition)
-            if type(value) ~= "table" then return value end
-            return EditorObjectReference.from(value, definition and definition.map_id)
-        end,
-        coerce = function(value, definition)
-            if type(value) == "table" then
-                return EditorObjectReference.from(value, definition and definition.map_id)
-            end
-            return tostring(value or "")
-        end
+        name = "Marker Reference (Legacy)",
+        control = "object_reference",
+        encode = self.types.object_reference.encode,
+        decode = self.types.object_reference.decode,
+        coerce = self.types.object_reference.coerce
     })
 end
 

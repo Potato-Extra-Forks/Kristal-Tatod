@@ -5,6 +5,9 @@ local EditorObjectReference = Class()
 function EditorObjectReference:init(map_id, object_id)
     self.map_id = map_id
     self.object_id = object_id
+    self.map = map_id
+    self.object = object_id
+    self.id = object_id
 end
 
 function EditorObjectReference:getLabel()
