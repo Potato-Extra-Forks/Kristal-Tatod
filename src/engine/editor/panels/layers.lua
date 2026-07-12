@@ -44,14 +44,27 @@ function EditorLayersPanel:init(editor)
     }))
 end
 
-function EditorLayersPanel:setDocument(document)
-    local map_id = document and document.primary_map_id
+function EditorLayersPanel:setDocument(document, map_id)
+    map_id = map_id or document and document.primary_map_id
     if self.document == document and self.map_id == map_id then return end
     self.document = document
     self.map_id = map_id
     self.new_button.enabled = document ~= nil
     self.selected_layer = nil
     self:refreshList()
+end
+
+function EditorLayersPanel:focusLayer(document, map_id, layer)
+    if self.document ~= document or self.map_id ~= map_id then
+        self.document = document
+        self.map_id = map_id
+        self.selected_layer = layer
+        self:refreshList(layer and layer._editor_uid)
+        return
+    end
+    local node = layer and self:findLayerNode(layer._editor_uid)
+    if node then self.list:selectNode(node) end
+    self:selectLayer(layer)
 end
 
 function EditorLayersPanel:getNewLayerItems(parent_uid)
@@ -105,7 +118,7 @@ function EditorLayersPanel:openLayerContextMenu(node, list, x, y)
 end
 
 function EditorLayersPanel:getLayers()
-    return self.document and self.document:getFlatEditableLayers(nil, true) or {}
+    return self.document and self.document:getFlatEditableLayers(self.map_id, true) or {}
 end
 
 function EditorLayersPanel:getLayerType(layer)
@@ -172,7 +185,7 @@ end
 function EditorLayersPanel:selectLayer(layer)
     self.selected_layer = layer
     if self.document then
-        self.document:setSelectedLayer(layer and layer._editor_uid or nil)
+        self.document:setSelectedLayer(layer and layer._editor_uid or nil, self.map_id)
     end
     if layer then
         self.editor:setPropertiesTarget(self:getPropertiesTarget(layer), self)
@@ -214,7 +227,7 @@ end
 function EditorLayersPanel:toggleLayerVisibility(layer)
     if not self.document or not layer then return false end
     self.editor:beginHistoryTransaction("Toggle Layer Visibility", self.document)
-    self.document:setEditableLayerVisible(layer._editor_uid, layer._editor_visible == false)
+    self.document:setEditableLayerVisible(layer._editor_uid, layer._editor_visible == false, self.map_id)
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
     self:refreshList(self.selected_layer and self.selected_layer._editor_uid)
@@ -223,7 +236,7 @@ end
 
 function EditorLayersPanel:changed(refresh_list)
     if not self.document or not self.selected_layer then return end
-    self.document:invalidatePreview()
+    self.document:invalidatePreview(self.map_id)
     if refresh_list then self:refreshList(self.selected_layer._editor_uid) end
 end
 
@@ -232,7 +245,7 @@ function EditorLayersPanel:renameLayer(layer, value)
     self.editor:beginHistoryTransaction("Rename Layer", self.document)
     layer.name = value
     local used = {}
-    for _, entry in ipairs(self.document:getFlatEditableLayers()) do
+    for _, entry in ipairs(self.document:getFlatEditableLayers(self.map_id)) do
         if entry.layer ~= layer and entry.layer.id then used[entry.layer.id] = true end
     end
     layer.id = EditorFormat.uniqueSlug(value, used, "layer")
@@ -276,7 +289,7 @@ end
 function EditorLayersPanel:createLayer(type_id, parent_uid)
     if not self.document then return false end
     self.editor:beginHistoryTransaction("Create Layer", self.document)
-    local layer = self.document:createEditableLayer(type_id, nil, parent_uid)
+    local layer = self.document:createEditableLayer(type_id, self.map_id, parent_uid)
     if not layer then self.editor:cancelHistoryTransaction() return false end
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
@@ -292,7 +305,7 @@ function EditorLayersPanel:deleteLayer()
         if entry.layer == self.selected_layer then index = candidate_index break end
     end
     self.editor:beginHistoryTransaction("Delete Layer", self.document)
-    self.document:removeEditableLayer(self.selected_layer._editor_uid)
+    self.document:removeEditableLayer(self.selected_layer._editor_uid, self.map_id)
     self.editor:markHistoryChanged()
     self.editor:commitHistoryTransaction()
     self.selected_layer = nil

@@ -183,7 +183,7 @@ function EditorMapView:drawObjectLinks()
         local mouse_x, mouse_y = love.mouse.getPosition()
         local local_x, local_y = self:toLocal(mouse_x, mouse_y)
         local x2, y2 = self:getMapCoordinates(local_x, local_y)
-        local target = self.document:findObjectAt(x2, y2)
+        local target = self.document:findObjectAt(x2, y2, { all_layers = true })
         if target and target.data ~= source.data then
             x2, y2 = self.document:getObjectWorldCenter(target)
             Draw.setColor(1, 0.84, 0.2, 0.95)
@@ -750,7 +750,8 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             if button == 2 then
                 return self.editor:cancelObjectLink() or true
             end
-            local selection = self.document:findObjectAt(world_x, world_y)
+            local selection = self.document:findObjectAt(world_x, world_y,
+                self.editor.object_link and { all_layers = true } or nil)
             if selection then selection.view = self end
             if self.editor.object_link then
                 return self.editor:finishObjectLink(selection)

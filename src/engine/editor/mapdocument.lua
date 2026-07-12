@@ -228,6 +228,24 @@ function EditorMapDocument:getSelectedLayer(id)
     return self.selected_layers[id or self.primary_map_id]
 end
 
+function EditorMapDocument:isLayerSelectable(layer, id)
+    if not layer or not self.editor or self.editor.darken_unselected_layers == false then return true end
+    id = id or self.primary_map_id
+    local selected_uid = self:getSelectedLayer(id)
+    if selected_uid == nil then return true end
+    local selectable = false
+    local function visit(layers, selected_ancestor)
+        for _, candidate in ipairs(layers or {}) do
+            local selected = selected_ancestor or candidate._editor_uid == selected_uid
+            if candidate == layer then selectable = selected return end
+            if candidate.layers then visit(candidate.layers, selected) end
+            if selectable then return end
+        end
+    end
+    visit(self:getEditableLayers(id), false)
+    return selectable
+end
+
 function EditorMapDocument:setEditableLayerVisible(uid, visible, id)
     id = id or self.primary_map_id
     local layer = self:findEditableLayer(uid, id)
@@ -942,7 +960,8 @@ function EditorMapDocument:setObjectShape(selection, shape)
     return true
 end
 
-function EditorMapDocument:findObjectAt(world_x, world_y)
+function EditorMapDocument:findObjectAt(world_x, world_y, options)
+    options = options or {}
     for entry_index = #self.maps, 1, -1 do
         local entry = self.maps[entry_index]
         local layers = self:getFlatEditableLayers(entry.id, false)
@@ -950,7 +969,8 @@ function EditorMapDocument:findObjectAt(world_x, world_y)
             local layer_entry = layers[layer_index]
             local layer = layer_entry.layer
             local layer_type = Registry.getLayerType(layer._editor_type_id)
-            if layer_entry.visible and layer_type and layer_type.kind == "object" then
+            if layer_entry.visible and layer_type and layer_type.kind == "object"
+                and (options.all_layers or self:isLayerSelectable(layer, entry.id)) then
                 local x = world_x - entry.x - (layer.offsetx or 0)
                 local y = world_y - entry.y - (layer.offsety or 0)
                 for object_index = #(layer.objects or {}), 1, -1 do
@@ -1016,14 +1036,16 @@ function EditorMapDocument:getObjectWorldBounds(selection)
     return min_x, min_y, max_x, max_y
 end
 
-function EditorMapDocument:findObjectsInRect(x1, y1, x2, y2)
+function EditorMapDocument:findObjectsInRect(x1, y1, x2, y2, options)
+    options = options or {}
     local min_x, min_y, max_x, max_y = math.min(x1, x2), math.min(y1, y2), math.max(x1, x2), math.max(y1, y2)
     local result = {}
     for _, entry in ipairs(self.maps) do
         for _, layer_entry in ipairs(self:getFlatEditableLayers(entry.id, false)) do
             local layer = layer_entry.layer
             local layer_type = Registry.getLayerType(layer._editor_type_id)
-            if layer_entry.visible and layer_type and layer_type.kind == "object" then
+            if layer_entry.visible and layer_type and layer_type.kind == "object"
+                and (options.all_layers or self:isLayerSelectable(layer, entry.id)) then
                 for _, object in ipairs(layer.objects or {}) do
                     if object.visible ~= false then
                         local selection = self:getObjectSelection(entry.id, layer, object)

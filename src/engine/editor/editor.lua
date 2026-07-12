@@ -1591,7 +1591,7 @@ function Editor:getMapObjectAtScreen(x, y)
     if not view then return nil end
     local local_x, local_y = view:toLocal(x, y)
     local world_x, world_y = view:getMapCoordinates(local_x, local_y)
-    return view.document:findObjectAt(world_x, world_y), view, world_x, world_y
+    return view.document:findObjectAt(world_x, world_y, { all_layers = true }), view, world_x, world_y
 end
 
 function Editor:addMapToWorldAtScreen(id, x, y)
@@ -1865,6 +1865,13 @@ function Editor:selectMapObjects(selections, primary)
     end
     self.selected_map_objects = result
     self.selected_map_object = result[1]
+    if self.selected_map_object then
+        local selection = self.selected_map_object
+        selection.document:setSelectedLayer(selection.layer._editor_uid, selection.map_id)
+        if self.layers_browser and self.active_document == selection.document then
+            self.layers_browser:focusLayer(selection.document, selection.map_id, selection.layer)
+        end
+    end
     if #result == 1 then
         self:setPropertiesTarget(self:getMapObjectPropertiesTarget(result[1]), self)
     elseif #result > 1 then
