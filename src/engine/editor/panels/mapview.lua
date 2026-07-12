@@ -191,6 +191,192 @@ function EditorMapView:snapToMapGrid(entry, world_x, world_y)
         entry.y + MathUtils.round((world_y - entry.y) / tile_height) * tile_height
 end
 
+function EditorMapView:getTileEditTarget(world_x, world_y)
+    local entry = self.document:getMapAt(world_x, world_y)
+    if not entry then return nil, "Move the cursor inside a map before editing tiles" end
+    local layer = self.document:getSelectedTileLayer(entry.id)
+    if not layer then return nil, "Select a tile layer before editing tiles" end
+    local tile_width, tile_height = self.document:getTileLayerCellSize(layer, entry.id)
+    local offset_x, offset_y = layer.offsetx or 0, layer.offsety or 0
+    local column = math.floor((world_x - entry.x - offset_x) / tile_width)
+    local row = math.floor((world_y - entry.y - offset_y) / tile_height)
+    local width, height = self.document:getTileLayerGridSize(layer, entry.id)
+    if column < 0 or row < 0 or column >= width or row >= height then
+        return nil, "Move the cursor inside the selected tile layer before editing tiles"
+    end
+    return {
+        entry = entry, map_id = entry.id, layer = layer,
+        column = column, row = row, width = width, height = height
+    }
+end
+
+function EditorMapView:getTilePaintSource()
+    local palette = self.editor and self.editor.tile_palette
+    local tileset = palette and palette.document
+    if not tileset or #palette.stamp == 0 then
+        return nil, nil, "Select a tile in the Tile Palette before painting"
+    end
+    return palette, tileset
+end
+
+function EditorMapView:encodePaintTile(target, tileset, tile_id)
+    local encoded, reason = self.document:encodeTileForLayer(
+        target.layer, target.map_id, tileset.id, tile_id)
+    if not encoded then return nil, reason end
+    return encoded
+end
+
+function EditorMapView:paintTileAnchor(target, erase)
+    local changed = false
+    if erase then
+        changed = self.document:setEncodedTile(target.layer, target.column, target.row,
+            0, target.map_id, true)
+    else
+        local palette, tileset, reason = self:getTilePaintSource()
+        if not palette then return false, reason end
+        if palette.random_mode then
+            local tile_id = palette:getRandomTile()
+            local encoded
+            encoded, reason = self:encodePaintTile(target, tileset, tile_id)
+            if not encoded then return false, reason end
+            changed = self.document:setEncodedTile(target.layer, target.column, target.row,
+                encoded, target.map_id, true)
+        else
+            for stamp_y, stamp_row in ipairs(palette.stamp) do
+                for stamp_x, tile_id in ipairs(stamp_row) do
+                    if tile_id ~= false then
+                        local column, row = target.column + stamp_x - 1, target.row + stamp_y - 1
+                        if column >= 0 and row >= 0 and column < target.width and row < target.height then
+                            local encoded
+                            encoded, reason = self:encodePaintTile(target, tileset, tile_id)
+                            if not encoded then return changed, reason end
+                            if self.document:setEncodedTile(target.layer, column, row,
+                                encoded, target.map_id, true) then changed = true end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if changed then self.document:invalidatePreview(target.map_id) end
+    return changed
+end
+
+function EditorMapView:fillTiles(target)
+    local palette, tileset, reason = self:getTilePaintSource()
+    if not palette then return false, reason end
+    local original = self.document:getEncodedTile(
+        target.layer, target.column, target.row, target.map_id)
+    local queue = { { target.column, target.row } }
+    local next_index, visited, changed = 1, {}, false
+    while next_index <= #queue do
+        local point = queue[next_index]
+        next_index = next_index + 1
+        local column, row = point[1], point[2]
+        local key = column .. ":" .. row
+        if not visited[key] then
+            visited[key] = true
+            if column >= 0 and row >= 0 and column < target.width and row < target.height
+                and self.document:getEncodedTile(target.layer, column, row, target.map_id) == original then
+                local tile_id = palette:getPaintTile(column - target.column, row - target.row)
+                if tile_id ~= false and tile_id ~= nil then
+                    local encoded
+                    encoded, reason = self:encodePaintTile(target, tileset, tile_id)
+                    if not encoded then return changed, reason end
+                    if self.document:setEncodedTile(target.layer, column, row,
+                        encoded, target.map_id, true) then changed = true end
+                end
+                table.insert(queue, { column - 1, row })
+                table.insert(queue, { column + 1, row })
+                table.insert(queue, { column, row - 1 })
+                table.insert(queue, { column, row + 1 })
+            end
+        end
+    end
+    if changed then self.document:invalidatePreview(target.map_id) end
+    return changed
+end
+
+function EditorMapView:beginTileEdit(tool, world_x, world_y)
+    local target, reason = self:getTileEditTarget(world_x, world_y)
+    if not target then
+        self.editor:addWarning(reason, nil, "tile_editing")
+        return true
+    end
+    if tool ~= "eraser" then
+        local palette
+        palette, _, reason = self:getTilePaintSource()
+        if not palette then
+            self.editor:addWarning(reason, nil, "tile_editing")
+            return true
+        end
+    end
+    self.editor:clearDiagnostics("tile_editing")
+    if tool == "tile_fill" then
+        self.editor:beginHistoryTransaction("Fill Tiles", self.document)
+        local changed
+        changed, reason = self:fillTiles(target)
+        if reason then self.editor:addWarning(reason, nil, "tile_editing") end
+        if changed then
+            self.editor:markHistoryChanged()
+            self.editor:commitHistoryTransaction()
+        else
+            self.editor:cancelHistoryTransaction()
+        end
+        return true
+    end
+    self.editor:beginHistoryTransaction(tool == "eraser" and "Erase Tiles" or "Paint Tiles",
+        self.document)
+    self.tile_stroke = { tool = tool, target = target, changed = false }
+    local changed
+    changed, reason = self:paintTileAnchor(target, tool == "eraser")
+    self.tile_stroke.changed = changed
+    if changed then self.editor:markHistoryChanged() end
+    if reason then self.editor:addWarning(reason, nil, "tile_editing") end
+    return true
+end
+
+function EditorMapView:continueTileEdit(world_x, world_y)
+    local stroke = self.tile_stroke
+    if not stroke then return false end
+    local target = self:getTileEditTarget(world_x, world_y)
+    if not target then return true end
+    local previous = stroke.target
+    if target.map_id ~= previous.map_id or target.layer ~= previous.layer then
+        stroke.target = target
+        local changed = self:paintTileAnchor(target, stroke.tool == "eraser")
+        if changed then
+            stroke.changed = true
+            self.editor:markHistoryChanged()
+        end
+        return true
+    end
+    local x0, y0, x1, y1 = previous.column, previous.row, target.column, target.row
+    local dx, sx = math.abs(x1 - x0), x0 < x1 and 1 or -1
+    local dy, sy = -math.abs(y1 - y0), y0 < y1 and 1 or -1
+    local error_value = dx + dy
+    while true do
+        if x0 ~= previous.column or y0 ~= previous.row then
+            local anchor = {
+                entry = target.entry, map_id = target.map_id, layer = target.layer,
+                column = x0, row = y0, width = target.width, height = target.height
+            }
+            local changed, reason = self:paintTileAnchor(anchor, stroke.tool == "eraser")
+            if changed then
+                stroke.changed = true
+                self.editor:markHistoryChanged()
+            end
+            if reason then self.editor:addWarning(reason, nil, "tile_editing") break end
+        end
+        if x0 == x1 and y0 == y1 then break end
+        local doubled = 2 * error_value
+        if doubled >= dy then error_value, x0 = error_value + dy, x0 + sx end
+        if doubled <= dx then error_value, y0 = error_value + dx, y0 + sy end
+    end
+    stroke.target = target
+    return true
+end
+
 function EditorMapView:getPolygonVertexAt(world_x, world_y)
     local selections = self.editor and self.editor:getSelectedMapObjects(self.document) or {}
     if #selections ~= 1 or not selections[1].data.polygon then return nil end
@@ -474,6 +660,15 @@ function EditorMapView:onMousePressed(x, y, button, presses)
             if #self.polygon_build.points == 0 then self:cancelPolygon() end
             return true
         end
+        if button == 1 and (tool == "tile_brush" or tool == "tile_fill") then
+            return self:beginTileEdit(tool, world_x, world_y)
+        end
+        if button == 1 and tool == "eraser" then
+            local entry = self.document:getMapAt(world_x, world_y)
+            if entry and self.document:getSelectedTileLayer(entry.id) then
+                return self:beginTileEdit(tool, world_x, world_y)
+            end
+        end
         if button == 1 and tool == "select" then
             local vertex_selection, vertex_index = self:getPolygonVertexAt(world_x, world_y)
             if vertex_selection then
@@ -679,6 +874,7 @@ function EditorMapView:onMouseMoved(x, y, dx, dy)
         return self.editor.game_preview:onMouseMoved(x, y, dx, dy)
     end
     local world_x, world_y = self:getMapCoordinates(x, y)
+    if self.tile_stroke then return self:continueTileEdit(world_x, world_y) end
     if self.polygon_build then
         local entry = self.document.map_lookup[self.polygon_build.map_id]
         if entry then world_x, world_y = self:snapToMapGrid(entry, world_x, world_y) end
@@ -795,6 +991,16 @@ function EditorMapView:onMouseReleased(x, y, button, presses)
     if self.editor and self.editor.live_document == self.document then
         return self.editor.game_preview:onMouseReleased(x, y, button, presses)
     end
+    if button == 1 and self.tile_stroke then
+        local changed = self.tile_stroke.changed
+        self.tile_stroke = nil
+        if changed then
+            self.editor:commitHistoryTransaction()
+        else
+            self.editor:cancelHistoryTransaction()
+        end
+        return true
+    end
     if button == 1 and self.event_region_drag then
         local drag = self.event_region_drag
         self.event_region_drag = nil
@@ -897,9 +1103,16 @@ function EditorMapView:getCursorType(x, y)
     if self.map_drag or self.dragging_canvas then return "grab" end
     if self.polygon_vertex_drag then return "resize_all" end
     if self.rotation_drag then return "resize_all" end
+    if self.tile_stroke then return "crosshair" end
     if self.editor and self.editor.active_tool == "link" then return "link" end
-    if self.editor and (self.editor.active_tool == "object" or self.editor.active_tool == "shape") then
+    if self.editor and (self.editor.active_tool == "object" or self.editor.active_tool == "shape"
+        or self.editor.active_tool == "tile_brush" or self.editor.active_tool == "tile_fill") then
         return "crosshair"
+    end
+    if self.editor and self.editor.active_tool == "eraser" then
+        local world_x, world_y = self:getMapCoordinates(x, y)
+        local entry = self.document:getMapAt(world_x, world_y)
+        if entry and self.document:getSelectedTileLayer(entry.id) then return "crosshair" end
     end
     local world_x, world_y = self:getMapCoordinates(x, y)
     if self.editor and self.editor.active_tool == "select" then

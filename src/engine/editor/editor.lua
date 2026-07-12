@@ -291,6 +291,28 @@ function Editor:setupWindow(session)
 end
 
 function Editor:registerMenuBar()
+    self.menu_bar:registerItem("file", "save_active", "Save Active Document (Ctrl+S)", {
+        is_enabled = function() return self.active_document ~= nil or self.active_tileset_document ~= nil end,
+        on_activate = function() self:saveActiveDocument() end
+    })
+    self.menu_bar:registerItem("file", "save_map_as_native", "Save Map as Native Format", {
+        is_enabled = function() return self.active_document ~= nil end,
+        on_activate = function() self:saveMapDocumentToProject(self.active_document, { force_native_path = true }) end
+    })
+    self.menu_bar:registerItem("file", "save_tileset", "Save Active Tileset", {
+        is_enabled = function() return self.active_tileset_document ~= nil end,
+        on_activate = function() self:saveTilesetDocumentToProject(self.active_tileset_document) end
+    })
+    self.menu_bar:registerItem("file", "save_tileset_as_native", "Save Tileset as Native Format", {
+        is_enabled = function() return self.active_tileset_document ~= nil end,
+        on_activate = function()
+            self:saveTilesetDocumentToProject(self.active_tileset_document, { force_native_path = true })
+        end
+    })
+    self.menu_bar:registerItem("file", "save_all", "Save All (Ctrl+Shift+S)", {
+        is_enabled = function() return self:hasUnsavedChanges() end,
+        on_activate = function() self:saveAllDocuments() end
+    })
     self.menu_bar:registerItem("edit", "undo", "Undo", {
         is_enabled = function() return self.history:canUndo() end,
         on_activate = function() self:undo() end
@@ -955,6 +977,214 @@ function Editor:clearDiagnostics(source)
     self.message_bar:clear(source)
 end
 
+local function validContentId(id)
+    if type(id) ~= "string" or id == "" or id:sub(1, 1) == "/" then return false end
+    for segment in id:gmatch("[^/]+") do
+        if segment == "." or segment == ".." or segment:find("[\\:*?\"<>|]") then return false end
+    end
+    return true
+end
+
+function Editor:getNativeContentPath(kind, id)
+    if not validContentId(id) then return nil, "Invalid " .. kind .. " id '" .. tostring(id) .. "'" end
+    local directory = kind == "map" and Registry.paths.maps
+        or kind == "tileset" and Registry.paths.tilesets
+        or kind == "world" and EditorFormat.WORLD_DIRECTORY
+    if not directory then return nil, "Unknown editor content kind '" .. tostring(kind) .. "'" end
+    return Mod.info.path .. "/scripts/" .. directory .. "/" .. id .. ".json"
+end
+
+function Editor:getMapSavePath(id, force_native_path)
+    local data = Registry.getMapData(id)
+    local reader = Registry.getMapReader(id)
+    local path = data and data.full_path
+    if not force_native_path and reader and not reader.LEGACY_FORMAT and type(path) == "string"
+        and path:sub(-#EditorFormat.MAP_EXTENSION) == EditorFormat.MAP_EXTENSION
+        and (path == Mod.info.path or StringUtils.startsWith(path, Mod.info.path .. "/")) then
+        return path
+    end
+    return self:getNativeContentPath("map", id)
+end
+
+function Editor:getTilesetSavePath(document, force_native_path)
+    local tileset = document and document.tileset
+    local reader = tileset and tileset.reader
+    local path = document and document.data and document.data.full_path
+        or tileset and tileset.path
+    if not force_native_path and reader and not reader.LEGACY_FORMAT and type(path) == "string"
+        and path:sub(-#EditorFormat.TILESET_EXTENSION) == EditorFormat.TILESET_EXTENSION
+        and (path == Mod.info.path or StringUtils.startsWith(path, Mod.info.path .. "/")) then
+        return path
+    end
+    return self:getNativeContentPath("tileset", document.id)
+end
+
+function Editor:saveMapDocumentToProject(document, options)
+    if not document then return false end
+    options = options or {}
+    local ids, seen = {}, {}
+    local function add(id)
+        if id and not seen[id] then seen[id] = true table.insert(ids, id) end
+    end
+    add(document.primary_map_id)
+    for id in pairs(document.editable_layers or {}) do add(id) end
+    table.sort(ids)
+
+    local prepared = {}
+    for _, id in ipairs(ids) do
+        local data, reason = EditorFormat.buildMapData(document, id, options)
+        if not data then
+            self:addError("Could not prepare map '" .. id .. "' for saving", reason, "editor_save")
+            return false
+        end
+        local encoded
+        encoded, reason = EditorFormat.encodeMap(data, options)
+        if not encoded then
+            self:addError("Could not encode map '" .. id .. "'", reason, "editor_save")
+            return false
+        end
+        local path
+        path, reason = self:getMapSavePath(id, options.force_native_path)
+        if not path then
+            self:addError("Could not choose a save path for map '" .. id .. "'", reason, "editor_save")
+            return false
+        end
+        local decoded
+        decoded, reason = EditorFormat.decodeMap(encoded, path, options)
+        if not decoded then
+            self:addError("Saved map '" .. id .. "' did not pass its own decoder", reason, "editor_save")
+            return false
+        end
+        decoded.id, decoded.full_path = id, path
+        table.insert(prepared, { id = id, path = path, encoded = encoded, data = decoded })
+    end
+
+    for _, entry in ipairs(prepared) do
+        local success, reason = EditorFormat.writeProjectFile(entry.path, entry.encoded)
+        if not success then
+            self:addError("Could not save map '" .. entry.id .. "'", reason, "editor_save")
+            return false
+        end
+    end
+    for _, entry in ipairs(prepared) do
+        Registry.registerMapData(entry.id, entry.data, EditorMapReader)
+        document:adoptSavedMapData(entry.id, entry.data)
+    end
+    self.history:markSaved(document)
+    self:clearDiagnostics("editor_save")
+    self:clearDiagnostics("unsaved_exit")
+    self.discard_changes_confirmed = false
+    self:selectMapObjects({})
+    if self.layers_browser and self.active_document == document then
+        self.layers_browser:setDocument(nil)
+        self.layers_browser:setDocument(document)
+    end
+    if self.map_browser then self.map_browser:refresh() end
+    return true
+end
+
+function Editor:saveTilesetDocumentToProject(document, options)
+    if not document then return false end
+    options = options or {}
+    local data, reason = EditorFormat.buildTilesetData(document, options)
+    if not data then
+        self:addError("Could not prepare tileset '" .. document.id .. "' for saving", reason, "editor_save")
+        return false
+    end
+    local encoded
+    encoded, reason = EditorFormat.encodeTileset(data, options)
+    if not encoded then
+        self:addError("Could not encode tileset '" .. document.id .. "'", reason, "editor_save")
+        return false
+    end
+    local path
+    path, reason = self:getTilesetSavePath(document, options.force_native_path)
+    if not path then
+        self:addError("Could not choose a save path for tileset '" .. document.id .. "'", reason, "editor_save")
+        return false
+    end
+    local decoded
+    decoded, reason = EditorFormat.decodeTileset(encoded, path, options)
+    if not decoded then
+        self:addError("Saved tileset '" .. document.id .. "' did not pass its own decoder", reason, "editor_save")
+        return false
+    end
+    decoded.id, decoded.full_path = document.id, path
+    local success
+    success, reason = EditorFormat.writeProjectFile(path, encoded)
+    if not success then
+        self:addError("Could not save tileset '" .. document.id .. "'", reason, "editor_save")
+        return false
+    end
+    local tileset_success, tileset = pcall(Tileset, decoded, path, FileSystemUtils.getDirname(path))
+    if not tileset_success then
+        self:addError("Tileset '" .. document.id .. "' was saved but could not be reloaded",
+            tostring(tileset), "editor_save")
+        return false
+    end
+    Registry.registerTileset(document.id, tileset)
+    document:adoptSavedData(decoded, tileset)
+    self.history:markSaved(document)
+    self:clearDiagnostics("editor_save")
+    self:clearDiagnostics("unsaved_exit")
+    self.discard_changes_confirmed = false
+    self:setActiveTileset(document)
+    if self.tileset_browser then self.tileset_browser:refresh(document.id) end
+    if self.tileset_editor and self.active_tileset_document == document then
+        self.tileset_editor:setDocument(document)
+    end
+    return true
+end
+
+function Editor:saveAllDocuments()
+    for _, document in ipairs(self.map_documents or {}) do
+        if document:isDirty() and not self:saveMapDocumentToProject(document) then return false end
+    end
+    for _, document in ipairs(self.tileset_documents or {}) do
+        if document:isDirty() and not self:saveTilesetDocumentToProject(document) then return false end
+    end
+    return true
+end
+
+function Editor:saveActiveDocument()
+    local focused = self.dockspace and self.dockspace.focused_control
+    while focused do
+        if focused == self.tileset_editor or focused == self.tile_palette or focused == self.tileset_browser then
+            return self:saveTilesetDocumentToProject(self.active_tileset_document)
+        end
+        focused = focused.parent
+    end
+    return self:saveMapDocumentToProject(self.active_document)
+end
+
+function Editor:createNewMap(id, name)
+    if not validContentId(id) then return nil, "Invalid map id" end
+    if hasMap(id) then return nil, "A map with that id already exists" end
+    local data = {
+        version = EditorFormat.MAP_FORMAT_VERSION,
+        kristal_version = tostring(Kristal.Version),
+        id = id,
+        name = name or StringUtils.titleCase(id:gsub("[/_]", " ")),
+        width = 16,
+        height = 12,
+        grid_width = 40,
+        grid_height = 40,
+        background_color = { 0, 0, 0, 0 },
+        layers = {},
+        properties = {},
+        __editor_property_types = {},
+        __map_reader = EditorMapReader
+    }
+    Registry.registerMapData(id, data, EditorMapReader)
+    local document = self:createMapDocument(id)
+    if not document then return nil, "Could not create an editor document" end
+    self.history.serial = self.history.serial + 1
+    document.history_revision = self.history.serial
+    self:activateMapDocument(document)
+    self:onHistoryChanged({ document }, false)
+    return document
+end
+
 function Editor:showDiagnosticsPanel()
     if not self.diagnostics_panel then return false end
     if not self.diagnostics_panel.visible then
@@ -1096,7 +1326,7 @@ function Editor:onHistoryChanged(owners, restored, command, direction)
     if dirty > 0 then
         self:addWarning(string.format("%d editor document%s contain unsaved changes",
             dirty, dirty == 1 and "" or "s"),
-            "Map and tileset serialization are not implemented yet; changes remain in the current editor working state.",
+            "Use File > Save All or Ctrl+Shift+S to write the current editor state to the active project.",
             "unsaved_changes")
     end
 end
@@ -1286,6 +1516,7 @@ function Editor:getMapObjectPropertiesTarget(selection)
     local function numberField(label, key)
         return {
             label = label,
+            compact = true,
             get = function() return data[key] or 0 end,
             set = function(value)
                 local number = tonumber(value)
@@ -1364,6 +1595,7 @@ function Editor:getMapObjectBatchPropertiesTarget(selections)
     local function batchNumberField(label, key)
         return {
             label = label,
+            compact = true,
             placeholder = "Mixed",
             get = function() return sharedValue(key) end,
             set = function(value)
@@ -1490,8 +1722,6 @@ function Editor:applyDrawFXToSelection(fx_id)
     self:markHistoryChanged()
     self:commitHistoryTransaction()
     self:setPropertiesTarget(self:getMapObjectPropertiesTarget(selection), self)
-    self:addWarning("DrawFX assignments are session-local until the editor format is implemented",
-        nil, "drawfx_editing")
     return true
 end
 
@@ -2093,7 +2323,7 @@ function Editor:removeMapDocument(document)
     if document:isDirty() and not document.discard_close_confirmed then
         document.discard_close_confirmed = true
         self:addWarning("Closing this map tab would discard unsaved changes",
-            "Map saving is unavailable until the editor format is implemented. Close the tab again to discard its current working changes.",
+            "Use File > Save Active Document first, or close the tab again to discard its current working changes.",
             "unsaved_close:" .. document.panel.id)
         return false
     end
@@ -2186,6 +2416,7 @@ function Editor:getGameObjectPropertiesTarget(object)
     local function numberField(label, key)
         return {
             label = label,
+            compact = true,
             get = function() return object[key] or 0 end,
             set = function(value)
                 local number = tonumber(value)
@@ -2378,6 +2609,10 @@ function Editor:onKeyPressed(key, is_repeat)
     if self.menu_bar:onKeyPressed(key) then return true end
     if Input.ctrl() and not is_repeat
         and not (self.dockspace.focused_control and self.dockspace.focused_control.accepts_text_input) then
+        if key == "s" then
+            if Input.shift() then return self:saveAllDocuments() end
+            return self:saveActiveDocument()
+        end
         if key == "z" then return Input.shift() and self:redo() or self:undo() end
         if key == "y" then return self:redo() end
     end
@@ -2423,7 +2658,7 @@ function Editor:beginExitTransition()
     if self:hasUnsavedChanges() and not self.discard_changes_confirmed then
         self.discard_changes_confirmed = true
         self:addWarning("Unsaved editor changes have not been written",
-            "Map saving is unavailable until the editor format is implemented. Trigger exit again to discard the current working changes.",
+            "Use File > Save All to write them, or trigger exit again to discard the current working changes.",
             "unsaved_exit")
         return false
     end

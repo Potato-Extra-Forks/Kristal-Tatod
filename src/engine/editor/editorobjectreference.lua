@@ -20,9 +20,13 @@ function EditorObjectReference:matches(map_id, object_id)
 end
 
 function EditorObjectReference.from(value, default_map_id)
-    if type(value) == "table" and value.includes and value:includes(EditorObjectReference) then return value end
+    if type(value) == "table" and value.includes and value:includes(EditorObjectReference) then
+        if value.map_id ~= nil or default_map_id == nil then return value end
+        return EditorObjectReference(default_map_id, value.object_id)
+    end
     if type(value) == "table" then
-        return EditorObjectReference(value.map_id or value.map, value.object_id or value.object or value.id)
+        return EditorObjectReference(value.map_id or value.map or default_map_id,
+            value.object_id or value.object or value.id)
     end
     if value == nil or value == "" then return EditorObjectReference(default_map_id, nil) end
     return EditorObjectReference(default_map_id, value)

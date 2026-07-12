@@ -14,7 +14,10 @@ function EditorTilesetBrowser:init(editor)
         on_select = function(item) if item then editor:setActiveTileset(item.data) end end,
         on_activate = function(item) if item then editor:showTilesetEditor(item.data) end end,
         on_rename = function(item, _, name)
-            item.data.data.name = name
+            editor:performHistoryEdit("Rename Tileset", item.data, function()
+                item.data.data.name = name
+                return true
+            end)
         end,
         on_context_menu = function(item, list, x, y) self:openContextMenu(item, list, x, y) end,
         on_drag_start = function(item)
@@ -50,15 +53,28 @@ function EditorTilesetBrowser:createTileset()
     while used[id] do index = index + 1 id = "new_tileset_" .. index end
     local document = EditorTilesetDocument(self.editor, id)
     table.insert(self.editor.tileset_documents, document)
+    self.editor.history.serial = self.editor.history.serial + 1
+    document.history_revision = self.editor.history.serial
     self:refresh(id)
     self.editor:setActiveTileset(document)
     self.editor:showTilesetEditor(document)
+    self.editor:onHistoryChanged({ document }, false)
 end
 
 function EditorTilesetBrowser:openContextMenu(item, list, x, y)
     local items = { { label = "New Tileset", action = function() self:createTileset() end } }
     if item then
         table.insert(items, { label = "Open Tileset Editor", action = function() self.editor:showTilesetEditor(item.data) end })
+        table.insert(items, {
+            label = "Save",
+            action = function() self.editor:saveTilesetDocumentToProject(item.data) end
+        })
+        table.insert(items, {
+            label = "Save as Native Format",
+            action = function()
+                self.editor:saveTilesetDocumentToProject(item.data, { force_native_path = true })
+            end
+        })
         table.insert(items, { label = "Rename", action = function() list:beginRename(item) end })
         if item.data.virtual then
             table.insert(items, { label = "Remove", action = function()

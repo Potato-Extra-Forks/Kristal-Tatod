@@ -11,6 +11,16 @@ local function uniqueName(parent, base)
     return base .. " " .. index
 end
 
+local function nodeRegistryId(node)
+    local parts = {}
+    local current = node
+    while current and not current.root do
+        table.insert(parts, 1, EditorFormat.slugId(current.name, current.type))
+        current = current.parent
+    end
+    return table.concat(parts, "/")
+end
+
 function EditorMapBrowser:init(editor)
     super.init(self, 0, 0, 240, 400)
     self.editor = editor
@@ -99,7 +109,20 @@ function EditorMapBrowser:selectNode(node)
     }, self)
 end
 
-function EditorMapBrowser:renamedNode(node)
+function EditorMapBrowser:renamedNode(node, old_name)
+    if node.type == "map" and node.virtual then
+        local id = nodeRegistryId(node)
+        local document, reason = self.editor:createNewMap(id, node.name)
+        if not document then
+            node.name = old_name
+            self.editor:addError("Could not create map '" .. id .. "'", reason, "editor_save")
+        else
+            node.registry_id = id
+            node.virtual = false
+            self:refresh()
+            return
+        end
+    end
     self:selectNode(node)
 end
 
@@ -174,6 +197,19 @@ function EditorMapBrowser:openNodeContextMenu(node, tree, x, y)
     local items = {}
     if node and node.type == "map" and node.registry_id then
         table.insert(items, { label = "Open", action = function() self:activateNode(node) end })
+        local document = self.editor:findMapDocument(node.registry_id)
+        if document then
+            table.insert(items, {
+                label = "Save",
+                action = function() self.editor:saveMapDocumentToProject(document) end
+            })
+            table.insert(items, {
+                label = "Save as Native Format",
+                action = function()
+                    self.editor:saveMapDocumentToProject(document, { force_native_path = true })
+                end
+            })
+        end
     end
     if not node or node.type == "folder" then
         table.insert(items, { label = "New Map", action = function() self:createMap(parent) end })

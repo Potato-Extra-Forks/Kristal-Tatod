@@ -4,6 +4,9 @@ local EditorWorld = Class()
 
 function EditorWorld:init(id)
     self.id = id
+    self.name = id
+    self.properties = {}
+    self.__editor_property_types = {}
     self.primary_map_id = nil
     self.maps = {}
     self.map_lookup = {}
@@ -24,14 +27,16 @@ function EditorWorld:addMap(id, x, y, options)
         return entry
     end
     local data = Registry.getMapData(id)
+    local grid_width = data and (data.grid_width or data.tilewidth) or 40
+    local grid_height = data and (data.grid_height or data.tileheight) or 40
     entry = {
         id = id,
         x = x or 0,
         y = y or 0,
-        width = data and (data.width or 16) * (data.tilewidth or 40),
-        height = data and (data.height or 12) * (data.tileheight or 40),
-        tile_width = data and data.tilewidth or 40,
-        tile_height = data and data.tileheight or 40,
+        width = data and (data.width or 16) * grid_width,
+        height = data and (data.height or 12) * grid_height,
+        tile_width = grid_width,
+        tile_height = grid_height,
         explicit_companion = options.explicit_companion ~= false,
         preview = nil,
         preview_attempted = false

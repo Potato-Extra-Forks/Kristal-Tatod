@@ -4,7 +4,6 @@ local EditorPlugins = {
     debug_directory = "plugins",
     plugins = {},
     plugin_order = {},
-    controls = {},
     panel_definitions = {},
     menu_definitions = {},
     event_initializers = {},
@@ -61,21 +60,6 @@ function PluginMethods:loadHooks()
     for _, path in ipairs(paths) do self:require(path) end
 end
 
-function PluginMethods:registerControl(id, control)
-    assert(type(id) == "string" and id ~= "", "Plugin controls require an id")
-    assert(not self.controls[id], "Duplicate plugin control id: " .. id)
-    if type(control) == "string" then control = self:require(control) end
-    assert(isClass(control), "Plugin controls must be an EditorControl class")
-    assert(control:includes(EditorControl), "Plugin controls must include EditorControl")
-    self.controls[id] = control
-    EditorPlugins.controls[namespaced(self, "control", id)] = control
-    return control
-end
-
-function PluginMethods:getControl(id)
-    return self.controls[id]
-end
-
 function PluginMethods:registerSettingsPage(id, title, options)
     assert(type(id) == "string" and id ~= "", "Plugin settings pages require an id")
     assert(not self.settings_pages[id], "Duplicate plugin settings page id: " .. id)
@@ -107,6 +91,23 @@ end
 function PluginMethods:registerPropertyType(id, definition)
     local type_id = namespaced(self, "property_type", id)
     Registry.registerEditorPropertyType(type_id, definition)
+    return type_id
+end
+
+function PluginMethods:registerLayerKind(id, definition)
+    local kind_id = namespaced(self, "layer_kind", id)
+    Registry.registerLayerKind(kind_id, definition)
+    return kind_id
+end
+
+function PluginMethods:registerLayerType(id, definition)
+    local type_id = namespaced(self, "layer_type", id)
+    definition = TableUtils.copy(definition or {}, true)
+    if definition.kind and not Registry.getLayerKind(definition.kind) then
+        local plugin_kind = namespaced(self, "layer_kind", definition.kind)
+        if Registry.getLayerKind(plugin_kind) then definition.kind = plugin_kind end
+    end
+    Registry.registerLayerType(type_id, definition)
     return type_id
 end
 
@@ -188,7 +189,6 @@ end
 function EditorPlugins:reset()
     self.plugins = {}
     self.plugin_order = {}
-    self.controls = {}
     self.panel_definitions = {}
     self.menu_definitions = {}
     self.event_initializers = {}
@@ -244,7 +244,7 @@ function EditorPlugins:loadPlugin(editor, directory, folder, source)
     end
 
     local plugin = setmetatable({
-        id = info.id, info = info, controls = {}, panels = {},
+        id = info.id, info = info, panels = {},
         settings_pages = {},
         loaded_scripts = {}, loading_scripts = {}, __editor_plugin = true
     }, { __index = PluginMethods })
@@ -304,10 +304,6 @@ function EditorPlugins:initialize(editor)
                 self:clearPluginHooks(plugin)
                 while #self.panel_definitions > panel_count do table.remove(self.panel_definitions) end
                 while #self.menu_definitions > menu_count do table.remove(self.menu_definitions) end
-                for id in pairs(plugin.controls) do
-                    self.controls[namespaced(plugin, "control", id)] = nil
-                end
-                plugin.controls = {}
                 plugin.panels = {}
                 editor.settings:removeOwner(plugin)
                 plugin.settings_pages = {}

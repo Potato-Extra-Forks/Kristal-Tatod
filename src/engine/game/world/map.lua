@@ -136,8 +136,9 @@ function Map:getMarker(id)
     local marker
 
     if type(id) == "table" then
-        if id.id ~= nil then
-            marker = self.markers_by_id[id.id]
+        local object_id = id.object_id or id.object or id.id
+        if object_id ~= nil then
+            marker = self.markers_by_id[object_id]
         end
     elseif type(id) == "number" then
         marker = self.markers_by_id[id]
@@ -156,8 +157,9 @@ end
 ---@param id string|integer|TiledObjectRef The name of the marker to search for, or the unique numerical ID.
 function Map:hasMarker(id)
     if type(id) == "table" then
-        if id.id ~= nil then
-            return self.markers_by_id[id.id] ~= nil
+        local object_id = id.object_id or id.object or id.id
+        if object_id ~= nil then
+            return self.markers_by_id[object_id] ~= nil
         end
     elseif type(id) == "number" then
         return self.markers_by_id[id] ~= nil
@@ -214,8 +216,9 @@ end
 ---@return Event? event The event instance, if found.
 function Map:getEvent(id)
     if type(id) == "table" then
-        if id.id ~= nil then
-            return self.events_by_id[id.id]
+        local object_id = id.object_id or id.object or id.id
+        if object_id ~= nil then
+            return self.events_by_id[object_id]
         end
     elseif type(id) == "number" then
         return self.events_by_id[id]

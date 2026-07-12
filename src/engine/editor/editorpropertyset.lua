@@ -2,19 +2,35 @@
 ---@overload fun(values?: table, types?: table): EditorPropertySet
 local EditorPropertySet = Class()
 
-function EditorPropertySet:init(values, types)
+function EditorPropertySet:init(values, types, order, definitions)
     self.values = values or {}
     self.types = types or {}
     self.order = {}
     self.definitions = {}
     self.group_order = {}
     self.groups = {}
-    local names = {}
-    for name in pairs(self.values) do table.insert(names, name) end
-    table.sort(names)
-    for _, name in ipairs(names) do
-        self:registerProperty(name, self.types[name] or self:inferType(self.values[name]), { custom = true })
+    local names, added = {}, {}
+    for _, name in ipairs(order or {}) do
+        if self.values[name] ~= nil and not added[name] then table.insert(names, name) added[name] = true end
     end
+    local remaining = {}
+    for name in pairs(self.values) do if not added[name] then table.insert(remaining, name) end end
+    table.sort(remaining)
+    for _, name in ipairs(remaining) do table.insert(names, name) end
+    for _, name in ipairs(names) do
+        self:registerProperty(name, self.types[name] or self:inferType(self.values[name]),
+            TableUtils.merge({ custom = true }, definitions and definitions[name] or {}))
+    end
+end
+
+function EditorPropertySet.fromEntries(entries, context)
+    local values, types, order, definitions = Registry.editor_properties:decodePropertyEntries(entries, context)
+    if not values then return nil, types end
+    return EditorPropertySet(values, types, order, definitions)
+end
+
+function EditorPropertySet:encodeEntries(context)
+    return Registry.editor_properties:encodePropertySet(self, context)
 end
 
 function EditorPropertySet:inferType(value)
@@ -54,6 +70,7 @@ end
 
 function EditorPropertySet:setValue(id, value)
     local definition = self.definitions[id] or self:registerProperty(id, self.types[id] or self:inferType(value), { custom = true })
+    if definition.unavailable then return false end
     local coerced = Registry.editor_properties:coerce(definition.type, value, definition)
     if coerced == nil then return false end
     self.values[id] = coerced

@@ -64,7 +64,9 @@ local function normalizeItem(item, index)
             color = item.color,
             right_icon = item.right_icon,
             right_color = item.right_color,
-            right_action = item.right_action
+            right_action = item.right_action,
+            indent = item.indent or 0,
+            disclosure = item.disclosure
         }
     end
     return { id = item, label = tostring(item), data = item }
@@ -122,12 +124,13 @@ function EditorItemList:updateRenameBounds()
     if not index then return self:finishRename(true) end
     local y = -(self.scroll_row - math.floor(self.scroll_row)) * self.row_height
         + (index - math.floor(self.scroll_row) - 1) * self.row_height
-    local label_x = 6
+    local label_x = 6 + (self.rename_item.indent or 0) * 14
+    if self.rename_item.disclosure then label_x = label_x + 14 end
     if self.rename_item.preview then
-        label_x = self.row_height + 4
+        label_x = label_x + self.row_height - 2
     elseif self.rename_item.icon then
         local texture = Assets.getTexture(self.rename_item.icon)
-        if texture then label_x = 6 + texture:getWidth() + 8 end
+        if texture then label_x = label_x + texture:getWidth() + 8 end
     end
     local right_space = self.rename_item.right_icon and self.row_height or 0
     self.rename_input:setBounds(label_x - 3, y + 1,
@@ -319,16 +322,21 @@ function EditorItemList:drawSelf()
             love.graphics.rectangle("fill", 0, y, self.width - self.scrollbar.width, self.row_height)
         end
         local item = self.filtered_items[index]
-        local label_x = 6
+        local label_x = 6 + (item.indent or 0) * 14
+        if item.disclosure then
+            love.graphics.setColor(0.72, 0.72, 0.76, 1)
+            love.graphics.print(item.disclosure, label_x, math.floor(y + (self.row_height - font:getHeight()) / 2))
+            label_x = label_x + 14
+        end
         if item.preview and item.preview.drawPreviewIcon then
             local padding = 4
             local preview_size = self.row_height - padding * 2
-            item.preview:drawPreviewIcon(padding, y + padding, preview_size, preview_size, 0.9)
-            label_x = self.row_height + 4
+            item.preview:drawPreviewIcon(label_x, y + padding, preview_size, preview_size, 0.9)
+            label_x = label_x + self.row_height - 2
         elseif item.icon then
             local texture = Assets.getTexture(item.icon)
             if texture then
-                local icon_x = 6
+                local icon_x = label_x
                 local icon_y = math.floor(y + (self.row_height - texture:getHeight()) / 2)
                 Draw.setColor(item.color or { 1, 1, 1, 1 })
                 Draw.draw(texture, icon_x, icon_y)

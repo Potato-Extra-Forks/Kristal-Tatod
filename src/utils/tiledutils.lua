@@ -18,6 +18,13 @@ local TiledUtils = {}
 ---@return Marker? data
 function TiledUtils.parseMarkerProperty(obj, target, name)
     if type(target) == "table" then
+        if target.object_id ~= nil then
+            -- Native editor object references retain their optional map id,
+            -- while legacy marker lookup still consumes the local object id.
+            target = target.object_id
+        end
+    end
+    if type(target) == "table" then
         ---@cast target Position|Marker|TiledObjectRef
         if target.center_x ~= nil and target.center_y ~= nil then
             -- This is marker data.

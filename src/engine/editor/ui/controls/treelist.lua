@@ -5,6 +5,10 @@ local EditorTreeList, super = Class(EditorControl)
 local INDENT_WIDTH = 16
 local ROW_HEIGHT = 26
 
+local function isContainer(node)
+    return node and node.children ~= nil
+end
+
 local function removeFromParent(node)
     if not node.parent then return end
     for index, child in ipairs(node.parent.children) do
@@ -35,6 +39,7 @@ function EditorTreeList:init(options)
     self.on_select = options.on_select
     self.on_activate = options.on_activate
     self.on_move = options.on_move
+    self.on_toggle = options.on_toggle
     self.on_rename = options.on_rename
     self.on_drag_outside = options.on_drag_outside
     self.on_drag_move = options.on_drag_move
@@ -74,15 +79,22 @@ end
 
 function EditorTreeList:newNode(node_type, name, options)
     options = options or {}
+    local container = node_type == "folder" or options.container == true
     local node = {
         type = node_type,
         name = tostring(name or (node_type == "folder" and "New Folder" or "New Map")),
-        children = node_type == "folder" and {} or nil,
-        expanded = node_type == "folder" and true or nil,
+        children = container and {} or nil,
+        expanded = container and options.expanded ~= false or nil,
         registry_id = options.registry_id,
         virtual = options.virtual == true,
         badge_text = options.badge_text,
         badge_color = options.badge_color,
+        data = options.data,
+        icon = options.icon,
+        color = options.color,
+        right_icon = options.right_icon,
+        right_color = options.right_color,
+        right_action = options.right_action,
         uid = self.next_uid
     }
     self.next_uid = self.next_uid + 1
@@ -90,7 +102,7 @@ function EditorTreeList:newNode(node_type, name, options)
 end
 
 function EditorTreeList:createFolder(parent, name, options)
-    parent = parent and parent.type == "folder" and parent or self.root
+    parent = isContainer(parent) and parent or self.root
     local node = self:newNode("folder", name, options)
     node.parent = parent
     parent.expanded = true
@@ -101,7 +113,7 @@ function EditorTreeList:createFolder(parent, name, options)
 end
 
 function EditorTreeList:createMap(parent, name, options)
-    parent = parent and parent.type == "folder" and parent or self.root
+    parent = isContainer(parent) and parent or self.root
     local node = self:newNode("map", name, options)
     node.parent = parent
     parent.expanded = true
@@ -126,7 +138,7 @@ function EditorTreeList:sort(folder)
         return a.name:lower() < b.name:lower()
     end)
     for _, child in ipairs(folder.children) do
-        if child.type == "folder" then self:sort(child) end
+        if isContainer(child) then self:sort(child) end
     end
     self:refreshVisibleNodes()
 end
@@ -142,7 +154,7 @@ end
 function EditorTreeList:nodeMatches(node)
     if self.filter == "" then return true end
     if node.name:lower():find(self.filter, 1, true) then return true end
-    if node.type == "folder" then
+    if isContainer(node) then
         for _, child in ipairs(node.children) do
             if self:nodeMatches(child) then return true end
         end
@@ -158,7 +170,7 @@ function EditorTreeList:refreshVisibleNodes()
             local visible = self.filter == "" or ancestor_matches or self:nodeMatches(node)
             if visible then
                 table.insert(self.visible_nodes, { node = node, depth = depth })
-                if node.type == "folder" and (self.filter ~= "" or node.expanded) then
+                if isContainer(node) and (self.filter ~= "" or node.expanded) then
                     addChildren(node, depth + 1, ancestor_matches or self_matches)
                 end
             end
@@ -235,7 +247,7 @@ end
 
 function EditorTreeList:getInsertionParent()
     if not self.selected_node then return self.root end
-    if self.selected_node.type == "folder" then return self.selected_node end
+    if isContainer(self.selected_node) then return self.selected_node end
     return self.selected_node.parent or self.root
 end
 
@@ -278,21 +290,23 @@ function EditorTreeList:updateRenameBounds()
     if not index then return self:finishRename(true) end
     local entry = self.visible_nodes[index]
     local label_x = 8 + entry.depth * INDENT_WIDTH + 30
+    local right_space = self.rename_node.right_icon and self.row_height or 0
     self.rename_input:setBounds(label_x - 3, self:getRowY(index) + 1,
-        math.max(20, self.width - self.scrollbar.width - label_x + 1), self.row_height - 2)
+        math.max(20, self.width - self.scrollbar.width - label_x - right_space + 1), self.row_height - 2)
 end
 
 function EditorTreeList:toggleFolder(node)
-    if not node or node.type ~= "folder" then return false end
+    if not isContainer(node) then return false end
     node.expanded = not node.expanded
     self:refreshVisibleNodes()
+    if self.on_toggle then self.on_toggle(node, node.expanded, self) end
     return true
 end
 
 function EditorTreeList:removeNode(node)
     if not node or not node.parent then return false end
     removeFromParent(node)
-    if self.selected_node == node or (node.type == "folder" and containsNode(node, self.selected_node)) then
+    if self.selected_node == node or (isContainer(node) and containsNode(node, self.selected_node)) then
         self.selected_node = nil
     end
     self:refreshVisibleNodes()
@@ -300,8 +314,8 @@ function EditorTreeList:removeNode(node)
 end
 
 function EditorTreeList:moveNode(node, parent, after)
-    if not node or not node.parent or not parent or parent.type ~= "folder" then return false end
-    if node == parent or (node.type == "folder" and containsNode(node, parent)) then return false end
+    if not node or not node.parent or not isContainer(parent) then return false end
+    if node == parent or (isContainer(node) and containsNode(node, parent)) then return false end
     local old_parent = node.parent
     removeFromParent(node)
     node.parent = parent
@@ -319,7 +333,7 @@ function EditorTreeList:moveNode(node, parent, after)
     if not inserted then table.insert(parent.children, node) end
     self:refreshVisibleNodes()
     self:selectNode(node)
-    if self.on_move then self.on_move(node, old_parent, parent, self) end
+    if self.on_move then self.on_move(node, old_parent, parent, after, self) end
     return true
 end
 
@@ -331,12 +345,12 @@ function EditorTreeList:getDropPlacement(x, y, node)
     local parent, after
     if not target then
         parent = self.root
-    elseif target.type == "folder" then
+    elseif isContainer(target) then
         parent = target
     else
         parent, after = target.parent or self.root, target
     end
-    if node.type == "folder" and containsNode(node, parent) then return nil end
+    if isContainer(node) and containsNode(node, parent) then return nil end
     return parent, after, target
 end
 
@@ -369,13 +383,22 @@ function EditorTreeList:onMousePressed(x, y, button, presses)
     self:selectNode(node)
     if already_selected and self.on_select then self.on_select(node, self) end
     local disclosure_x = 5 + entry.depth * INDENT_WIDTH
-    if node.type == "folder" and x >= disclosure_x and x < disclosure_x + 13 then
+    if isContainer(node) and x >= disclosure_x and x < disclosure_x + 13 then
         self:toggleFolder(node)
         return true
     end
+    if node.right_icon and node.right_action then
+        local texture = Assets.getTexture(node.right_icon)
+        local icon_width = texture and texture:getWidth() or self.row_height
+        local icon_right = self.width - self.scrollbar.width - 6
+        if x >= icon_right - icon_width and x <= icon_right then
+            node.right_action(node, self)
+            return true
+        end
+    end
     if presses and presses >= 2 then
-        if node.type == "folder" then
-            self:beginRename(node)
+        if isContainer(node) then
+            self:toggleFolder(node)
         elseif self.on_activate then
             self.on_activate(node, self)
         end
@@ -432,18 +455,18 @@ function EditorTreeList:onKeyPressed(key)
         self:selectIndex((index or 0) + 1)
         return true
     elseif key == "left" and self.selected_node then
-        if self.selected_node.type == "folder" and self.selected_node.expanded then
+        if isContainer(self.selected_node) and self.selected_node.expanded then
             self:toggleFolder(self.selected_node)
         elseif self.selected_node.parent and self.selected_node.parent ~= self.root then
             self:selectNode(self.selected_node.parent)
         end
         return true
-    elseif key == "right" and self.selected_node and self.selected_node.type == "folder" then
+    elseif key == "right" and isContainer(self.selected_node) then
         if not self.selected_node.expanded then self:toggleFolder(self.selected_node) end
         return true
     elseif key == "return" or key == "kpenter" then
         if self.selected_node then
-            if self.selected_node.type == "folder" then
+            if isContainer(self.selected_node) then
                 self:toggleFolder(self.selected_node)
             elseif self.on_activate then
                 self.on_activate(self.selected_node, self)
@@ -484,7 +507,7 @@ function EditorTreeList:drawSelf()
         end
 
         local disclosure_x = 5 + entry.depth * INDENT_WIDTH
-        if node.type == "folder" then
+        if isContainer(node) then
             Draw.setColor(0.72, 0.72, 0.76, 1)
             if node.expanded then
                 love.graphics.polygon("fill", disclosure_x + 1, y + 10, disclosure_x + 10, y + 10,
@@ -493,11 +516,19 @@ function EditorTreeList:drawSelf()
                 love.graphics.polygon("fill", disclosure_x + 2, y + 8, disclosure_x + 8, y + 13,
                     disclosure_x + 2, y + 18)
             end
-            if self.folder_icon then
+            local icon = node.icon and Assets.getTexture(node.icon) or self.folder_icon
+            if icon then
                 local scale = 2
-                Draw.setColor(1, 1, 1, 1)
-                Draw.draw(self.folder_icon, disclosure_x + 13,
-                    math.floor(y + (self.row_height - self.folder_icon:getHeight() * scale) / 2), 0, scale, scale)
+                Draw.setColor(node.color or { 1, 1, 1, 1 })
+                Draw.draw(icon, disclosure_x + 13,
+                    math.floor(y + (self.row_height - icon:getHeight() * scale) / 2), 0, scale, scale)
+            end
+        elseif node.icon then
+            local icon = Assets.getTexture(node.icon)
+            if icon then
+                Draw.setColor(node.color or { 1, 1, 1, 1 })
+                Draw.draw(icon, disclosure_x + 13,
+                    math.floor(y + (self.row_height - icon:getHeight() * 2) / 2), 0, 2, 2)
             end
         end
 
@@ -510,6 +541,15 @@ function EditorTreeList:drawSelf()
                 Draw.setColor(node.badge_color or { 1, 1, 1, 1 })
                 love.graphics.print(node.badge_text, label_x + font:getWidth(node.name) + 4,
                     math.floor(y + (self.row_height - font:getHeight()) / 2))
+            end
+        end
+        if node.right_icon then
+            local texture = Assets.getTexture(node.right_icon)
+            if texture then
+                local icon_x = self.width - self.scrollbar.width - texture:getWidth() - 6
+                local icon_y = math.floor(y + (self.row_height - texture:getHeight()) / 2)
+                Draw.setColor(node.right_color or { 0.82, 0.82, 0.85, 1 })
+                Draw.draw(texture, icon_x, icon_y)
             end
         end
     end

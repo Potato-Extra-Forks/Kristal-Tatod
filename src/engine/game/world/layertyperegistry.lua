@@ -2,12 +2,34 @@
 ---@overload fun(): LayerTypeRegistry
 local LayerTypeRegistry = Class()
 
+local function objectLoader(callback)
+    return function(map, layer, depth, reader, definition)
+        if callback then callback(map, layer, depth, reader, definition) end
+        map:loadShapes(layer)
+    end
+end
+
+local function eventLoader(group)
+    return objectLoader(function(map, layer, depth)
+        map:loadObjects(layer, depth, group)
+    end)
+end
+
+local function mapLoader(method)
+    return objectLoader(function(map, layer)
+        map[method](map, layer)
+    end)
+end
+
 local DEFAULT_KINDS = {
     {
         id = "group",
         format = {
             "id",
             "name",
+            "color",
+            "depth",
+            "visible",
             "layers"
         }
     },
@@ -16,6 +38,8 @@ local DEFAULT_KINDS = {
         format = {
             "default",
             "tileset",
+            "tileset_columns",
+            "tileset_rows",
             "chunks",
         },
         extra_format = {
@@ -49,31 +73,99 @@ local DEFAULT_KINDS = {
 }
 
 local DEFAULT_TYPES = {
-    { id = "default",        name = "Unknown",         kind = "object", icon = "editor/ui/layer/default",        color = { 0.8, 0.8, 0.82, 1 } },
-    { id = "folder",         name = "Unknown",         kind = "group",  icon = "editor/ui/layer/default",        color = { 1, 1, 1, 1 } },
+    { id = "default",        name = "Unknown",         kind = "object", icon = "editor/ui/layer/default",        color = { 0.8, 0.8, 0.82, 1 }, load = objectLoader() },
+    { id = "folder",         name = "Folder",          kind = "group",  icon = "editor/ui/layer/default",        color = { 1, 1, 1, 1 } },
     { id = "tile",           name = "Tiles",           kind = "tile",   icon = "editor/ui/layer/tile",           color = { 0.8, 0.8, 0.82, 1 } },
     { id = "image",          name = "Image",           kind = "image",  icon = "editor/ui/layer/image",          color = { 0.8, 0.8, 0.82, 1 } },
-    { id = "objects",        name = "Objects",         kind = "object", icon = "editor/ui/layer/objects",        color = { 0, 1, 1, 1 } },
-    { id = "controllers",    name = "Controllers",     kind = "object", icon = "editor/ui/layer/controllers",    color = { 0.72, 0.48, 1, 1 } },
-    { id = "markers",        name = "Markers",         kind = "object", icon = "editor/ui/layer/markers",        color = { 1, 0.82, 0.16, 1 } },
-    { id = "collision",      name = "Collision",       kind = "object", icon = "editor/ui/layer/collision",      color = { 0, 0, 1, 1 } },
-    { id = "enemycollision", name = "Enemy Collision", kind = "object", icon = "editor/ui/layer/enemycollision", color = { 0, 1, 1, 1 } },
-    { id = "blockcollision", name = "Block Collision", kind = "object", icon = "editor/ui/layer/blockcollision", color = { 1, 0.35, 0, 1 } },
-    { id = "paths",          name = "Paths",           kind = "object", icon = "editor/ui/layer/paths",          color = { 1, 0.35, 0.85, 1 } },
-    { id = "battleareas",    name = "Battle Areas",    kind = "object", icon = "editor/ui/layer/battleareas",    color = { 1, 0.25, 0.25, 1 } },
+    { id = "objects",        name = "Objects",         kind = "object", icon = "editor/ui/layer/objects",        color = { 0, 1, 1, 1 },       load = eventLoader("events") },
+    { id = "controllers",    name = "Controllers",     kind = "object", icon = "editor/ui/layer/controllers",    color = { 0.72, 0.48, 1, 1 }, load = eventLoader("controllers") },
+    { id = "markers",        name = "Markers",         kind = "object", icon = "editor/ui/layer/markers",        color = { 1, 0.82, 0.16, 1 }, load = mapLoader("loadMarkers") },
+    { id = "collision",      name = "Collision",       kind = "object", icon = "editor/ui/layer/collision",      color = { 0, 0, 1, 1 },       load = mapLoader("loadCollision") },
+    { id = "enemycollision", name = "Enemy Collision", kind = "object", icon = "editor/ui/layer/enemycollision", color = { 0, 1, 1, 1 },       load = mapLoader("loadEnemyCollision") },
+    { id = "blockcollision", name = "Block Collision", kind = "object", icon = "editor/ui/layer/blockcollision", color = { 1, 0.35, 0, 1 },    load = mapLoader("loadBlockCollision") },
+    { id = "paths",          name = "Paths",           kind = "object", icon = "editor/ui/layer/paths",          color = { 1, 0.35, 0.85, 1 }, load = mapLoader("loadPaths") },
+    { id = "battleareas",    name = "Battle Areas",    kind = "object", icon = "editor/ui/layer/battleareas",    color = { 1, 0.25, 0.25, 1 }, load = mapLoader("loadBattleAreas") },
     { id = "battleborder",   name = "Battle Border",   kind = "tile",   icon = "editor/ui/layer/default",        color = { 0.75, 0.85, 1, 1 } },
 }
 
 function LayerTypeRegistry:init()
-    LayerTypeRegistry.kinds = {}
+    self.kinds = {}
+    self.kind_order = {}
     self.types = {}
     self.order = {}
     for _, definition in ipairs(DEFAULT_KINDS) do
-        table.insert(self.kinds, definition)
+        self:registerKind(definition.id, definition)
     end
     for _, definition in ipairs(DEFAULT_TYPES) do
         self:register(definition.id, definition)
     end
+end
+
+---@param id string
+---@param definition table
+function LayerTypeRegistry:registerKind(id, definition)
+    assert(type(id) == "string" and id ~= "", "Layer kind requires a non-empty id")
+    assert(type(definition) == "table", "Layer kind definition must be a table")
+    local entry = TableUtils.copy(definition, true)
+    entry.id = id
+    entry.name = entry.name or StringUtils.titleCase(id:gsub("_", " "))
+    entry.format = entry.format or { "default" }
+    entry.extra_format = entry.extra_format or {}
+    if not self.kinds[id] then table.insert(self.kind_order, id) end
+    self.kinds[id] = entry
+    return entry
+end
+
+function LayerTypeRegistry:getKind(id)
+    return self.kinds[id]
+end
+
+function LayerTypeRegistry:getKinds()
+    local result = {}
+    for _, id in ipairs(self.kind_order) do table.insert(result, self.kinds[id]) end
+    return result
+end
+
+---Expands the kind's `default` marker without making the encoder know about
+---individual kinds. Additional nested ordering is returned separately.
+function LayerTypeRegistry:getKindFormat(id, default_format)
+    local kind = self:getKind(id)
+    if not kind then return TableUtils.copy(default_format or {}, true), {} end
+    local result = {}
+    for _, field in ipairs(kind.format or {}) do
+        if field == "default" then
+            for _, common in ipairs(default_format or {}) do table.insert(result, common) end
+        else
+            table.insert(result, field)
+        end
+    end
+    return result, TableUtils.copy(kind.extra_format or {}, true)
+end
+
+---Kind callbacks operate on format data, not runtime Layer instances. They are
+---the extension point for plugin kinds whose payload needs normalization.
+function LayerTypeRegistry:encodeKind(id, layer, context)
+    local kind = self:getKind(id)
+    if not kind then return TableUtils.copy(layer, true), nil, false end
+    if kind.encode then
+        local encoded, err = kind.encode(layer, context or {}, kind)
+        return encoded, err, true
+    end
+    return TableUtils.copy(layer, true), nil, true
+end
+
+function LayerTypeRegistry:decodeKind(id, data, context)
+    local kind = self:getKind(id)
+    if not kind then
+        -- Retain unknown plugin-kind payloads for a later session where the
+        -- owning plugin may be installed again.
+        return TableUtils.copy(data, true), nil, false
+    end
+    if kind.decode then
+        local decoded, err = kind.decode(data, context or {}, kind)
+        return decoded, err, true
+    end
+    return TableUtils.copy(data, true), nil, true
 end
 
 ---@param id string
@@ -86,6 +178,8 @@ function LayerTypeRegistry:register(id, definition)
     entry.name = entry.name or id
     entry.icon = entry.icon or "editor/ui/layer/default"
     entry.color = entry.color or { 1, 1, 1, 1 }
+    entry.kind = entry.kind or "object"
+    assert(self:getKind(entry.kind), "Unknown layer kind: " .. tostring(entry.kind))
     if not self.types[id] then table.insert(self.order, id) end
     self.types[id] = entry
     return entry

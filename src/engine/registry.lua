@@ -731,6 +731,21 @@ function Registry.registerEditorEvent(id, class)
 end
 
 ---@param id string
+---@param definition table
+function Registry.registerLayerKind(id, definition)
+    assert(self.layer_types, "Layer type registry is not initialized")
+    return self.layer_types:registerKind(id, definition)
+end
+
+function Registry.getLayerKind(id)
+    return self.layer_types and self.layer_types:getKind(id)
+end
+
+function Registry.getLayerKinds()
+    return self.layer_types and self.layer_types:getKinds() or {}
+end
+
+---@param id string
 ---@param class Tileset
 function Registry.registerTileset(id, class)
     self.tilesets[id] = class
@@ -1096,6 +1111,7 @@ function Registry.initMaps()
 
 
     EditorFormat.registerMaps(self)
+    EditorFormat.registerWorlds(self)
 
     Kristal.callEvent(KRISTAL_EVENT.onRegisterMaps)
 end

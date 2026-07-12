@@ -119,7 +119,8 @@ function EditorTilesetPanel:getItemTarget(item)
     item.__editor_property_types = item.__editor_property_types or {}
     local set = EditorPropertySet(item.properties, item.__editor_property_types)
     local function field(label, key, numeric)
-        return { label = label, get = function() return item[key] or (numeric and 0 or "") end,
+        return { label = label, compact = numeric == true,
+            get = function() return item[key] or (numeric and 0 or "") end,
             set = function(value)
                 if numeric then value = tonumber(value) if not value then return false end end
                 item[key] = value return true

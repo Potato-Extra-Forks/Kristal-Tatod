@@ -132,7 +132,14 @@ end
 function EditorPropertiesPanel:createValueControl(name, definition, value)
     local property_type = self:getPropertyType(name, definition, value)
     local control_type = Registry.getEditorPropertyType(property_type).control or "text"
-    if control_type == "table" or type(value) == "table" then
+    if control_type == "object_reference"
+        or control_type == "marker_reference" and type(value) == "table" then
+        return self:addGeneratedControl(EditorObjectReferenceControl(self.editor, value, {
+            on_changed = function(reference)
+                self:setPropertyValue(name, reference, definition)
+            end
+        }))
+    elseif control_type == "table" or type(value) == "table" then
         return self:addGeneratedControl(EditorTableInput(self.editor, value, {
             on_changed = function(table_value)
                 return self:setPropertyValue(name, table_value, definition)
@@ -144,12 +151,6 @@ function EditorPropertiesPanel:createValueControl(name, definition, value)
         end))
     elseif control_type == "choice" then
         return self:addGeneratedControl(self:createChoiceControl(name, definition, value))
-    elseif control_type == "object_reference" then
-        return self:addGeneratedControl(EditorObjectReferenceControl(self.editor, value, {
-            on_changed = function(reference)
-                self:setPropertyValue(name, reference, definition)
-            end
-        }))
     end
     local multiline = control_type == "multiline_value"
         or definition and (definition.multiline == true or definition.custom == true and property_type == "string")
@@ -180,7 +181,12 @@ function EditorPropertiesPanel:createSectionValueControl(section, definition)
         self:finishTargetHistory(true)
         return true
     end
-    if property_type.control == "table" or type(value) == "table" then
+    if property_type.control == "object_reference"
+        or property_type.control == "marker_reference" and type(value) == "table" then
+        return self:addGeneratedControl(EditorObjectReferenceControl(self.editor, value, {
+            on_changed = function(reference) changed(reference) end
+        }))
+    elseif property_type.control == "table" or type(value) == "table" then
         return self:addGeneratedControl(EditorTableInput(self.editor, value, {
             on_changed = function(table_value) return changed(table_value) end
         }))
@@ -201,10 +207,6 @@ function EditorPropertiesPanel:createSectionValueControl(section, definition)
             self.editor.dockspace:openContextMenu(items, x, y + button.height, button)
         end)
         return self:addGeneratedControl(button)
-    elseif property_type.control == "object_reference" then
-        return self:addGeneratedControl(EditorObjectReferenceControl(self.editor, value, {
-            on_changed = function(reference) changed(reference) end
-        }))
     end
     local multiline = property_type.control == "multiline_value" or definition.multiline == true
     local input = self:addGeneratedControl(EditorTextInput({
@@ -270,9 +272,29 @@ function EditorPropertiesPanel:rebuild()
         end
         table.insert(self.layout_rows, {
             kind = "standard", label = field.label,
-            controls = { value_control }, value_control = value_control
+            controls = { value_control }, value_control = value_control,
+            compact = field.compact == true and field.multiline ~= true
         })
     end
+
+    local packed_rows = {}
+    local row_index = 1
+    while row_index <= #self.layout_rows do
+        local row = self.layout_rows[row_index]
+        local next_row = self.layout_rows[row_index + 1]
+        if row.compact and next_row and next_row.compact then
+            table.insert(packed_rows, {
+                kind = "standard_pair",
+                rows = { row, next_row },
+                controls = { row.value_control, next_row.value_control }
+            })
+            row_index = row_index + 2
+        else
+            table.insert(packed_rows, row)
+            row_index = row_index + 1
+        end
+    end
+    self.layout_rows = packed_rows
 
     local definitions, included = self:getSchema(), {}
     for _, definition in ipairs(definitions) do
@@ -283,9 +305,11 @@ function EditorPropertiesPanel:rebuild()
             on_submit = function(value) self:renameProperty(name, value) end
         } or nil))
         name_input:setValue(name, true)
-        name_input.enabled = definition.custom == true
+        name_input.enabled = definition.custom == true and definition.unavailable ~= true
         local value_control = self:createValueControl(name, definition, value)
+        value_control.enabled = definition.unavailable ~= true
         local remove_button = self:addGeneratedControl(EditorButton("-", function() self:removeProperty(name) end))
+        remove_button.enabled = definition.unavailable ~= true
         table.insert(self.layout_rows, {
             kind = "property", property_name = name, definition = definition,
             name_input = name_input, value_control = value_control, remove_button = remove_button,
@@ -500,6 +524,15 @@ function EditorPropertiesPanel:update(dt)
             local control_height = row.value_control.multiline and 96 or 28
             row.value_control:setBounds(padding, y + 18, width, control_height)
             y = y + control_height + 26
+        elseif row.kind == "standard_pair" then
+            local gap = 8
+            local column_width = math.max(30, (width - gap) / 2)
+            for column, compact_row in ipairs(row.rows) do
+                local x = padding + (column - 1) * (column_width + gap)
+                compact_row.label_x, compact_row.label_y = x, y
+                compact_row.value_control:setBounds(x, y + 18, column_width, 28)
+            end
+            y = y + 54
         elseif row.kind == "property" then
             if not property_header_set then
                 self.property_header_y = y + 2
@@ -566,6 +599,13 @@ function EditorPropertiesPanel:drawSelf()
         if row.kind == "standard" and row.label_y and row.label_y >= 27 and row.label_y < self.height then
             Draw.setColor(0.68, 0.68, 0.72, 1)
             love.graphics.print(row.label, 8, row.label_y)
+        elseif row.kind == "standard_pair" then
+            for _, compact_row in ipairs(row.rows) do
+                if compact_row.label_y and compact_row.label_y >= 27 and compact_row.label_y < self.height then
+                    Draw.setColor(0.68, 0.68, 0.72, 1)
+                    love.graphics.print(compact_row.label, compact_row.label_x, compact_row.label_y)
+                end
+            end
         elseif row.kind == "fx_section" and row.label_y and row.label_y >= 27 and row.label_y < self.height then
             Draw.setColor(0.48, 0.72, 1, 1)
             love.graphics.print("FX: " .. row.label, 8, row.label_y)

@@ -1,5 +1,5 @@
 function Plugin:init(editor)
-    local HelpDirectory = self:registerControl("help_directory", "scripts.controls.helpdirectory")
+    local HelpDirectory = self:require("scripts.controls.helpdirectory")
 
     local panel = self:registerPanel("help_directory", "Help Directory", function()
         return HelpDirectory(self)
