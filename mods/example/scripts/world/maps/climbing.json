@@ -768,6 +768,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "climbing",
                 "object": 55
               }
             }
@@ -913,8 +914,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry_right"
+              "type": "object_reference",
+              "value": {
+                "map": "room2",
+                "object": 13
+              }
             }
           ],
           "opacity": 1
@@ -967,6 +971,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "climbing",
                 "object": 26
               }
             }
@@ -992,6 +997,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "climbing",
                 "object": 29
               }
             }
@@ -1017,6 +1023,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "climbing",
                 "object": 28
               }
             }
@@ -1042,6 +1049,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "climbing",
                 "object": 28
               }
             }
@@ -1067,6 +1075,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "climbing",
                 "object": 59
               }
             }
@@ -1092,6 +1101,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "climbing",
                 "object": 57
               }
             }
@@ -1143,8 +1153,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "slide"
+              "type": "object_reference",
+              "value": {
+                "map": "postclimb",
+                "object": 73
+              }
             }
           ],
           "opacity": 1

@@ -342,8 +342,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry"
+              "type": "object_reference",
+              "value": {
+                "map": "room1",
+                "object": 30
+              }
             }
           ],
           "opacity": 1
@@ -370,8 +373,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry"
+              "type": "object_reference",
+              "value": {
+                "map": "climbing",
+                "object": 8
+              }
             }
           ],
           "opacity": 1

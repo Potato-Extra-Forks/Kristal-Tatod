@@ -592,8 +592,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry_left"
+              "type": "object_reference",
+              "value": {
+                "map": "postclimb",
+                "object": 101
+              }
             }
           ],
           "opacity": 1
@@ -791,8 +794,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry_climb"
+              "type": "object_reference",
+              "value": {
+                "map": "room1",
+                "object": 38
+              }
             }
           ],
           "opacity": 1

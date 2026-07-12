@@ -112,7 +112,9 @@ function EditorPropertyRegistry:init()
         name = "Marker Reference (Legacy)",
         control = "object_reference",
         encode = self.types.object_reference.encode,
-        decode = self.types.object_reference.decode,
+        decode = function(value)
+            return type(value) == "table" and TableUtils.copy(value, true) or value
+        end,
         coerce = self.types.object_reference.coerce
     })
 end

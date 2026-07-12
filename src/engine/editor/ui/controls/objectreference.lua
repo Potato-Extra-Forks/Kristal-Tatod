@@ -19,6 +19,9 @@ end
 
 function EditorObjectReferenceControl:getLabel()
     if type(self.value) == "table" then
+        if self.editor and self.editor.getObjectReferenceLabel then
+            return self.editor:getObjectReferenceLabel(self.value)
+        end
         return EditorObjectReference.from(self.value):getLabel()
     end
     if self.value == nil or self.value == "" then return "Drag to an object..." end

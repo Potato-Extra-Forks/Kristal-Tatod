@@ -1747,10 +1747,16 @@ function Editor:getMapObjectPropertiesTarget(selection)
             on_set = function() selection.document:invalidatePreview(selection.map_id) end
         })
     end
+    local function valueField(label, key)
+        return EditorPropertyFields.value(data, label, key, {
+            on_set = function() selection.document:invalidatePreview(selection.map_id) end
+        })
+    end
     return {
         title = event_id and (StringUtils.titleCase(tostring(event_id):gsub("[/_]", " "))) or "Map Object",
         history_owner = selection.document,
         fields = {
+            valueField("Name", "name"),
             numberField("X", "x"), numberField("Y", "y"),
             {
                 label = "Shape",
@@ -1983,6 +1989,31 @@ function Editor:startObjectReferenceDrag(control)
         self.message_bar:setStatus("Linking object reference: drop onto a target object (Esc to cancel)", 3600)
     end
     return true
+end
+
+function Editor:getObjectReferenceLabel(value)
+    local source = self.selected_map_object
+    local reference = EditorObjectReference.from(value, source and source.map_id)
+    local object_name
+    for _, document in ipairs(self.map_documents or {}) do
+        local selection = document:resolveObjectReference(reference)
+        if selection then
+            object_name = selection.data.name
+            if object_name ~= nil and object_name ~= "" then break end
+        end
+    end
+    if (object_name == nil or object_name == "") and reference.map_id then
+        local data = Registry.getMapData(reference.map_id)
+        if data then
+            MapUtils.walkObjects(data.layers, function(object)
+                if object_name == nil and tostring(object.id) == tostring(reference.object_id)
+                    and object.name ~= nil and object.name ~= "" then
+                    object_name = object.name
+                end
+            end)
+        end
+    end
+    return reference:getLabel(object_name)
 end
 
 function Editor:finishObjectReferenceDrag(x, y)

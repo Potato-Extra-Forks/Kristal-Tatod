@@ -493,6 +493,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "postclimb",
                 "object": 94
               }
             }
@@ -518,6 +519,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "postclimb",
                 "object": 95
               }
             }
@@ -546,8 +548,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry_right"
+              "type": "object_reference",
+              "value": {
+                "map": "voidclimb",
+                "object": 73
+              }
             }
           ],
           "opacity": 1

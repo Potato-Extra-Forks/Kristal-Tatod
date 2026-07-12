@@ -650,6 +650,7 @@
               "name": "exit",
               "type": "object_reference",
               "value": {
+                "map": "room1",
                 "object": 49
               }
             },
@@ -662,6 +663,7 @@
               "name": "target",
               "type": "object_reference",
               "value": {
+                "map": "room1",
                 "object": 47
               }
             }
@@ -918,8 +920,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry_left"
+              "type": "object_reference",
+              "value": {
+                "map": "room2",
+                "object": 8
+              }
             }
           ],
           "center_x": 820,
@@ -1013,8 +1018,11 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
-              "value": "entry_left"
+              "type": "object_reference",
+              "value": {
+                "map": "voidclimb",
+                "object": 142
+              }
             }
           ],
           "center_x": 790,
@@ -1043,8 +1051,9 @@
             },
             {
               "name": "marker",
-              "type": "marker_reference",
+              "type": "object_reference",
               "value": {
+                "map": "room1",
                 "object": 55
               }
             },

@@ -10,12 +10,13 @@ function EditorObjectReference:init(map_id, object_id)
     self.id = object_id
 end
 
-function EditorObjectReference:getLabel()
+function EditorObjectReference:getLabel(object_name)
     if self.object_id == nil then return "None" end
+    local object_label = object_name ~= nil and object_name ~= "" and object_name or self.object_id
     if self.map_id and self.map_id ~= "" then
-        return tostring(self.map_id) .. " : " .. tostring(self.object_id)
+        return tostring(self.map_id) .. ":" .. tostring(object_label)
     end
-    return tostring(self.object_id)
+    return tostring(object_label)
 end
 
 function EditorObjectReference:matches(map_id, object_id)
