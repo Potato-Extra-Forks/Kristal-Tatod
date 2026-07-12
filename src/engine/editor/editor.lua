@@ -6,19 +6,6 @@ local EDITOR_MUSIC = "edit"
 local EDITOR_MUSIC_VOLUME = 0.5
 local EDITOR_MUSIC_FADE_TIME = 1
 
-local function copyTable(source)
-    local result = setmetatable({}, getmetatable(source))
-    for key, value in pairs(source) do result[key] = value end
-    return result
-end
-
-local function gameTraceback(error_value)
-    if type(error_value) == "table" then
-        error_value = error_value.msg or error_value.critical or tostring(error_value)
-    end
-    return debug.traceback(tostring(error_value), 2)
-end
-
 ---@class Editor
 local Editor = {
     editor_mode = true,
@@ -295,19 +282,9 @@ function Editor:registerMenuBar()
         is_enabled = function() return self.active_document ~= nil or self.active_tileset_document ~= nil end,
         on_activate = function() self:saveActiveDocument() end
     })
-    self.menu_bar:registerItem("file", "save_map_as_native", "Save Map as Native Format", {
-        is_enabled = function() return self.active_document ~= nil end,
-        on_activate = function() self:saveMapDocumentToProject(self.active_document, { force_native_path = true }) end
-    })
     self.menu_bar:registerItem("file", "save_tileset", "Save Active Tileset", {
         is_enabled = function() return self.active_tileset_document ~= nil end,
         on_activate = function() self:saveTilesetDocumentToProject(self.active_tileset_document) end
-    })
-    self.menu_bar:registerItem("file", "save_tileset_as_native", "Save Tileset as Native Format", {
-        is_enabled = function() return self.active_tileset_document ~= nil end,
-        on_activate = function()
-            self:saveTilesetDocumentToProject(self.active_tileset_document, { force_native_path = true })
-        end
     })
     self.menu_bar:registerItem("file", "save_all", "Save All (Ctrl+Shift+S)", {
         is_enabled = function() return self:hasUnsavedChanges() end,
@@ -841,8 +818,8 @@ function Editor:enter(previous, options)
     self.editor_cursor = EditorCursor()
     self.editor_cursor:setCustomEnabled(self.use_custom_cursors)
 
-    local context_document, restored_by_panel = self:setupMapDocuments(session)
     EditorPlugins:initialize(self)
+    local context_document, restored_by_panel = self:setupMapDocuments(session)
     self.settings_browser = EditorSettingsPanel(self)
     self.event_browser:refresh()
     self.fx_browser:refresh()
@@ -1019,7 +996,7 @@ local function validContentId(id)
     return true
 end
 
-function Editor:getNativeContentPath(kind, id)
+function Editor:getContentSavePath(kind, id)
     if not validContentId(id) then return nil, "Invalid " .. kind .. " id '" .. tostring(id) .. "'" end
     local directory = kind == "map" and Registry.paths.maps
         or kind == "tileset" and Registry.paths.tilesets
@@ -1028,34 +1005,33 @@ function Editor:getNativeContentPath(kind, id)
     return Mod.info.path .. "/scripts/" .. directory .. "/" .. id .. ".json"
 end
 
-function Editor:getMapSavePath(id, force_native_path)
+function Editor:getMapSavePath(id)
     local data = Registry.getMapData(id)
     local reader = Registry.getMapReader(id)
     local path = data and data.full_path
-    if not force_native_path and reader and not reader.LEGACY_FORMAT and type(path) == "string"
+    if reader and not reader.LEGACY_FORMAT and type(path) == "string"
         and path:sub(-#EditorFormat.MAP_EXTENSION) == EditorFormat.MAP_EXTENSION
         and (path == Mod.info.path or StringUtils.startsWith(path, Mod.info.path .. "/")) then
         return path
     end
-    return self:getNativeContentPath("map", id)
+    return self:getContentSavePath("map", id)
 end
 
-function Editor:getTilesetSavePath(document, force_native_path)
+function Editor:getTilesetSavePath(document)
     local tileset = document and document.tileset
     local reader = tileset and tileset.reader
     local path = document and document.data and document.data.full_path
         or tileset and tileset.path
-    if not force_native_path and reader and not reader.LEGACY_FORMAT and type(path) == "string"
+    if reader and not reader.LEGACY_FORMAT and type(path) == "string"
         and path:sub(-#EditorFormat.TILESET_EXTENSION) == EditorFormat.TILESET_EXTENSION
         and (path == Mod.info.path or StringUtils.startsWith(path, Mod.info.path .. "/")) then
         return path
     end
-    return self:getNativeContentPath("tileset", document.id)
+    return self:getContentSavePath("tileset", document.id)
 end
 
-function Editor:saveMapDocumentToProject(document, options)
+function Editor:saveMapDocumentToProject(document)
     if not document then return false end
-    options = options or {}
     local ids, seen = {}, {}
     local function add(id)
         if id and not seen[id] then seen[id] = true table.insert(ids, id) end
@@ -1066,25 +1042,25 @@ function Editor:saveMapDocumentToProject(document, options)
 
     local prepared = {}
     for _, id in ipairs(ids) do
-        local data, reason = EditorFormat.buildMapData(document, id, options)
+        local data, reason = EditorFormatDocument.buildMapData(document, id)
         if not data then
             self:addError("Could not prepare map '" .. id .. "' for saving", reason, "editor_save")
             return false
         end
         local encoded
-        encoded, reason = EditorFormat.encodeMap(data, options)
+        encoded, reason = EditorFormat.encodeMap(data)
         if not encoded then
             self:addError("Could not encode map '" .. id .. "'", reason, "editor_save")
             return false
         end
         local path
-        path, reason = self:getMapSavePath(id, options.force_native_path)
+        path, reason = self:getMapSavePath(id)
         if not path then
             self:addError("Could not choose a save path for map '" .. id .. "'", reason, "editor_save")
             return false
         end
         local decoded
-        decoded, reason = EditorFormat.decodeMap(encoded, path, options)
+        decoded, reason = EditorFormat.decodeMap(encoded, path)
         if not decoded then
             self:addError("Saved map '" .. id .. "' did not pass its own decoder", reason, "editor_save")
             return false
@@ -1094,7 +1070,7 @@ function Editor:saveMapDocumentToProject(document, options)
     end
 
     for _, entry in ipairs(prepared) do
-        local success, reason = EditorFormat.writeProjectFile(entry.path, entry.encoded)
+        local success, reason = ProjectFileSystem.writeFile(entry.path, entry.encoded)
         if not success then
             self:addError("Could not save map '" .. entry.id .. "'", reason, "editor_save")
             return false
@@ -1128,35 +1104,34 @@ function Editor:saveMapDocumentToProject(document, options)
     return true
 end
 
-function Editor:saveTilesetDocumentToProject(document, options)
+function Editor:saveTilesetDocumentToProject(document)
     if not document then return false end
-    options = options or {}
-    local data, reason = EditorFormat.buildTilesetData(document, options)
+    local data, reason = EditorFormatDocument.buildTilesetData(document)
     if not data then
         self:addError("Could not prepare tileset '" .. document.id .. "' for saving", reason, "editor_save")
         return false
     end
     local encoded
-    encoded, reason = EditorFormat.encodeTileset(data, options)
+    encoded, reason = EditorFormat.encodeTileset(data)
     if not encoded then
         self:addError("Could not encode tileset '" .. document.id .. "'", reason, "editor_save")
         return false
     end
     local path
-    path, reason = self:getTilesetSavePath(document, options.force_native_path)
+    path, reason = self:getTilesetSavePath(document)
     if not path then
         self:addError("Could not choose a save path for tileset '" .. document.id .. "'", reason, "editor_save")
         return false
     end
     local decoded
-    decoded, reason = EditorFormat.decodeTileset(encoded, path, options)
+    decoded, reason = EditorFormat.decodeTileset(encoded, path)
     if not decoded then
         self:addError("Saved tileset '" .. document.id .. "' did not pass its own decoder", reason, "editor_save")
         return false
     end
     decoded.id, decoded.full_path = document.id, path
     local success
-    success, reason = EditorFormat.writeProjectFile(path, encoded)
+    success, reason = ProjectFileSystem.writeFile(path, encoded)
     if not success then
         self:addError("Could not save tileset '" .. document.id .. "'", reason, "editor_save")
         return false
@@ -1559,18 +1534,9 @@ function Editor:getMapObjectPropertiesTarget(selection)
         end
     end
     local function numberField(label, key)
-        return {
-            label = label,
-            compact = true,
-            get = function() return data[key] or 0 end,
-            set = function(value)
-                local number = tonumber(value)
-                if not number then return false end
-                data[key] = number
-                selection.document:invalidatePreview(selection.map_id)
-                return true
-            end
-        }
+        return EditorPropertyFields.number(data, label, key, {
+            on_set = function() selection.document:invalidatePreview(selection.map_id) end
+        })
     end
     return {
         title = event_id and (StringUtils.titleCase(tostring(event_id):gsub("[/_]", " "))) or "Map Object",
@@ -1833,7 +1799,7 @@ end
 
 function Editor:runGameCallback(phase, callback)
     if self.game_faulted then return false end
-    local success, result = xpcall(callback, gameTraceback)
+    local success, result = xpcall(callback, ErrorUtils.traceback)
     if not success then
         self:recordGameError(phase, result)
         return false
@@ -1847,11 +1813,11 @@ function Editor:runGameDraw(phase, callback)
     local original_canvas = love.graphics.getCanvas()
     local original_scale_x, original_scale_y = CURRENT_SCALE_X, CURRENT_SCALE_Y
     local draw_state = {
-        canvas_stack = copyTable(Draw._canvas_stack),
-        scissor_stack = copyTable(Draw._scissor_stack),
-        shader_stack = copyTable(Draw._shader_stack),
-        locked_canvas = copyTable(Draw._locked_canvas),
-        locked_canvas_stack = copyTable(Draw._locked_canvas_stack)
+        canvas_stack = TableUtils.copy(Draw._canvas_stack),
+        scissor_stack = TableUtils.copy(Draw._scissor_stack),
+        shader_stack = TableUtils.copy(Draw._shader_stack),
+        locked_canvas = TableUtils.copy(Draw._locked_canvas),
+        locked_canvas_stack = TableUtils.copy(Draw._locked_canvas_stack)
     }
     local original_push, original_pop = love.graphics.push, love.graphics.pop
     local graphics_depth = 0
@@ -1867,7 +1833,7 @@ function Editor:runGameDraw(phase, callback)
         graphics_depth = graphics_depth - 1
     end
 
-    local success, result = xpcall(callback, gameTraceback)
+    local success, result = xpcall(callback, ErrorUtils.traceback)
     love.graphics.push, love.graphics.pop = original_push, original_pop
 
     local draw_stacks_balanced = #Draw._canvas_stack == #draw_state.canvas_stack
@@ -1875,7 +1841,7 @@ function Editor:runGameDraw(phase, callback)
         and #Draw._locked_canvas_stack == #draw_state.locked_canvas_stack
     if success and (graphics_depth ~= 1 or not draw_stacks_balanced) then
         success = false
-        result = gameTraceback(string.format(
+        result = ErrorUtils.traceback(string.format(
             "Game preview draw left graphics state unbalanced (graphics %d, canvas %d/%d, scissor %d/%d, shader %d/%d, locks %d/%d)",
             graphics_depth, #Draw._canvas_stack, #draw_state.canvas_stack,
             #Draw._scissor_stack, #draw_state.scissor_stack,
@@ -2472,22 +2438,15 @@ end
 
 function Editor:getGameObjectPropertiesTarget(object)
     local function numberField(label, key)
-        return {
-            label = label,
-            compact = true,
-            get = function() return object[key] or 0 end,
-            set = function(value)
-                local number = tonumber(value)
-                if not number then
-                    self:addWarning(label .. " must be a number", nil, "object_property")
-                    return false
-                end
-                object[key] = number
-                if object.data then object.data[key] = number end
+        return EditorPropertyFields.number(object, label, key, {
+            on_invalid = function()
+                self:addWarning(label .. " must be a number", nil, "object_property")
+            end,
+            on_set = function(value)
+                if object.data then object.data[key] = value end
                 self:clearDiagnostics("object_property")
-                return true
             end
-        }
+        })
     end
     local data = object.data
     if data then

@@ -13,10 +13,6 @@ local EditorPlugins = {
 local NIL_RESULT = {}
 local PluginMethods = {}
 
-local function tracebackError(value)
-    return debug.traceback(tostring(value), 2)
-end
-
 local function normalizeScriptPath(path)
     path = tostring(path or ""):gsub("\\", "/"):gsub("%.lua$", "")
     return path:gsub("%.", "/"):gsub("^/+", "")
@@ -24,6 +20,10 @@ end
 
 local function namespaced(plugin, kind, id)
     return string.format("plugin:%s:%s:%s", plugin.id, kind, id)
+end
+
+function PluginMethods:trackRegistration(cleanup)
+    table.insert(self.registration_cleanups, cleanup)
 end
 
 function PluginMethods:require(path, ...)
@@ -42,7 +42,7 @@ function PluginMethods:require(path, ...)
     local arguments = { ... }
     local success, result
     HookSystem.withOwner(self, function()
-        success, result = xpcall(function() return chunk(unpack(arguments)) end, tracebackError)
+        success, result = xpcall(function() return chunk(unpack(arguments)) end, ErrorUtils.traceback)
     end)
     _G.Plugin = previous_plugin
     self.loading_scripts[path] = nil
@@ -90,13 +90,25 @@ end
 
 function PluginMethods:registerPropertyType(id, definition)
     local type_id = namespaced(self, "property_type", id)
-    Registry.registerEditorPropertyType(type_id, definition)
+    local registered = Registry.registerEditorPropertyType(type_id, definition)
+    self:trackRegistration(function()
+        if Registry.editor_properties.types[type_id] == registered then
+            Registry.editor_properties.types[type_id] = nil
+            TableUtils.removeValue(Registry.editor_properties.type_order, type_id)
+        end
+    end)
     return type_id
 end
 
 function PluginMethods:registerLayerKind(id, definition)
     local kind_id = namespaced(self, "layer_kind", id)
-    Registry.registerLayerKind(kind_id, definition)
+    local registered = Registry.registerLayerKind(kind_id, definition)
+    self:trackRegistration(function()
+        if Registry.layer_types.kinds[kind_id] == registered then
+            Registry.layer_types.kinds[kind_id] = nil
+            TableUtils.removeValue(Registry.layer_types.kind_order, kind_id)
+        end
+    end)
     return kind_id
 end
 
@@ -107,7 +119,13 @@ function PluginMethods:registerLayerType(id, definition)
         local plugin_kind = namespaced(self, "layer_kind", definition.kind)
         if Registry.getLayerKind(plugin_kind) then definition.kind = plugin_kind end
     end
-    Registry.registerLayerType(type_id, definition)
+    local registered = Registry.registerLayerType(type_id, definition)
+    self:trackRegistration(function()
+        if Registry.layer_types.types[type_id] == registered then
+            Registry.layer_types.types[type_id] = nil
+            TableUtils.removeValue(Registry.layer_types.order, type_id)
+        end
+    end)
     return type_id
 end
 
@@ -121,17 +139,38 @@ function PluginMethods:registerEditorEventInitializer(event_id, initializer)
     assert(type(initializer) == "function", "EditorEvent initializers must be functions")
     EditorPlugins.event_initializers[event_id] = EditorPlugins.event_initializers[event_id] or {}
     table.insert(EditorPlugins.event_initializers[event_id], initializer)
+    self:trackRegistration(function()
+        local initializers = EditorPlugins.event_initializers[event_id]
+        if not initializers then return end
+        TableUtils.removeValue(initializers, initializer)
+        if #initializers == 0 then EditorPlugins.event_initializers[event_id] = nil end
+    end)
     return initializer
 end
 
-function PluginMethods:registerEditorEvent(id, event)
+function PluginMethods:registerEditorEvent(id, event, options)
     if type(event) == "string" then event = self:require(event) end
-    Registry.registerEditorEvent(id, event)
-    return event
+    options = options or {}
+    local event_id = id
+    local previous = Registry.getEditorEvent(event_id)
+    assert(not previous or options.replace == true,
+        "Editor event '" .. tostring(event_id) .. "' is already registered; pass replace = true to override it")
+    local previous_id = event.id
+    Registry.registerEditorEvent(event_id, event)
+    self:trackRegistration(function()
+        if Registry.editor_events[event_id] == event then Registry.editor_events[event_id] = previous end
+        if event.id == event_id then event.id = previous_id end
+    end)
+    return event_id
 end
 
 function PluginMethods:registerEditorDrawFX(id, definition)
-    return Registry.registerEditorDrawFX(namespaced(self, "draw_fx", id), definition)
+    local fx_id = namespaced(self, "draw_fx", id)
+    local registered = Registry.registerEditorDrawFX(fx_id, definition)
+    self:trackRegistration(function()
+        if Registry.editor_draw_fx[fx_id] == registered then Registry.editor_draw_fx[fx_id] = nil end
+    end)
+    return fx_id
 end
 
 function PluginMethods:registerPanel(id, title, content_factory, options)
@@ -150,6 +189,10 @@ function PluginMethods:registerPanel(id, title, content_factory, options)
     }
     self.panels[id] = definition
     table.insert(EditorPlugins.panel_definitions, definition)
+    self:trackRegistration(function()
+        self.panels[id] = nil
+        TableUtils.removeValue(EditorPlugins.panel_definitions, definition)
+    end)
     return definition
 end
 
@@ -161,6 +204,7 @@ function PluginMethods:registerMenuItem(menu_id, id, label, options)
         id = namespaced(self, "menu", id), label = label or id, options = options or {}
     }
     table.insert(EditorPlugins.menu_definitions, definition)
+    self:trackRegistration(function() TableUtils.removeValue(EditorPlugins.menu_definitions, definition) end)
     return definition
 end
 
@@ -173,6 +217,7 @@ function PluginMethods:registerMenuToggle(menu_id, id, label, get_checked, set_c
         get_checked = get_checked, set_checked = set_checked
     }
     table.insert(EditorPlugins.menu_definitions, definition)
+    self:trackRegistration(function() TableUtils.removeValue(EditorPlugins.menu_definitions, definition) end)
     return definition
 end
 
@@ -183,6 +228,7 @@ function PluginMethods:registerMenuProvider(menu_id, id, provider)
         id = namespaced(self, "menu", id), provider = provider
     }
     table.insert(EditorPlugins.menu_definitions, definition)
+    self:trackRegistration(function() TableUtils.removeValue(EditorPlugins.menu_definitions, definition) end)
     return definition
 end
 
@@ -204,6 +250,27 @@ function EditorPlugins:clearPluginHooks(plugin)
     end)
 end
 
+function EditorPlugins:clearPluginRegistrations(plugin)
+    if not plugin or plugin.registrations_cleared then return end
+    plugin.registrations_cleared = true
+    for index = #plugin.registration_cleanups, 1, -1 do
+        local success, message = xpcall(plugin.registration_cleanups[index], ErrorUtils.traceback)
+        if not success and self.editor then
+            self:report(self.editor, "Could not clean up editor plugin registration: " .. plugin.id, message)
+        end
+    end
+    plugin.registration_cleanups = {}
+end
+
+function EditorPlugins:disablePlugin(plugin)
+    if not plugin or plugin.disabled then return end
+    plugin.disabled = true
+    self:clearPluginHooks(plugin)
+    if self.editor and self.editor.settings then self.editor.settings:removeOwner(plugin) end
+    self:clearPluginRegistrations(plugin)
+    plugin.settings_pages = {}
+end
+
 function EditorPlugins:report(editor, message, detail)
     editor:addWarning(message, detail, "editor_plugin")
     print(message .. (detail and ("\n" .. detail) or ""))
@@ -223,6 +290,20 @@ function EditorPlugins:loadPlugin(editor, directory, folder, source)
     if type(info.id) ~= "string" or info.id == "" then
         self:report(editor, "Could not load editor plugin: " .. folder, "plugin.json requires a non-empty id")
         return nil
+    end
+    for _, field in ipairs({ "dependencies", "optionalDependencies" }) do
+        if info[field] ~= nil and type(info[field]) ~= "table" then
+            self:report(editor, "Could not load editor plugin: " .. info.id,
+                "plugin.json field '" .. field .. "' must be an array")
+            return nil
+        end
+        for _, dependency in ipairs(info[field] or {}) do
+            if type(dependency) ~= "string" or dependency == "" then
+                self:report(editor, "Could not load editor plugin: " .. info.id,
+                    "plugin.json field '" .. field .. "' contains an invalid plugin id")
+                return nil
+            end
+        end
     end
     if self.plugins[info.id] then
         if source == "user" and self.plugins[info.id].info.source == "debug" then return nil end
@@ -246,26 +327,65 @@ function EditorPlugins:loadPlugin(editor, directory, folder, source)
     local plugin = setmetatable({
         id = info.id, info = info, panels = {},
         settings_pages = {},
-        loaded_scripts = {}, loading_scripts = {}, __editor_plugin = true
+        loaded_scripts = {}, loading_scripts = {}, registration_cleanups = {},
+        __editor_plugin = true
     }, { __index = PluginMethods })
     self.plugins[plugin.id] = plugin
     table.insert(self.plugin_order, plugin)
 
-    if info.script_chunks.plugin then
-        local loaded, result = xpcall(function() return plugin:require("plugin") end, tracebackError)
-        if not loaded then
-            self:clearPluginHooks(plugin)
-            editor.settings:removeOwner(plugin)
-            self.plugins[plugin.id] = nil
-            TableUtils.removeValue(self.plugin_order, plugin)
-            self:report(editor, "Could not initialize editor plugin script: " .. plugin.id, result)
-            return nil
-        end
-        if type(result) == "table" and result ~= plugin then
-            for key, value in pairs(result) do plugin[key] = value end
-        end
-    end
     return plugin
+end
+
+function EditorPlugins:sortPlugins(editor)
+    local state, sorted = {}, {}
+    local function visit(plugin, dependency_of)
+        if state[plugin] == "done" then return not plugin.disabled end
+        if state[plugin] == "visiting" then
+            self:disablePlugin(plugin)
+            self:report(editor, "Circular editor plugin dependency: " .. plugin.id,
+                dependency_of and ("Required by " .. dependency_of.id) or nil)
+            return false
+        end
+        state[plugin] = "visiting"
+        for _, dependency_id in ipairs(plugin.info.dependencies or {}) do
+            local dependency = self.plugins[dependency_id]
+            if not dependency then
+                self:disablePlugin(plugin)
+                self:report(editor, "Missing editor plugin dependency for " .. plugin.id, dependency_id)
+                state[plugin] = "done"
+                return false
+            end
+            if not visit(dependency, plugin) then
+                self:disablePlugin(plugin)
+                self:report(editor, "Editor plugin dependency failed for " .. plugin.id, dependency_id)
+                state[plugin] = "done"
+                return false
+            end
+        end
+        for _, dependency_id in ipairs(plugin.info.optionalDependencies or {}) do
+            local dependency = self.plugins[dependency_id]
+            if dependency then visit(dependency, plugin) end
+        end
+        state[plugin] = "done"
+        if not plugin.disabled then table.insert(sorted, plugin) end
+        return not plugin.disabled
+    end
+    local discovered = TableUtils.copy(self.plugin_order)
+    for _, plugin in ipairs(discovered) do visit(plugin) end
+    for _, plugin in ipairs(discovered) do
+        if plugin.disabled then table.insert(sorted, plugin) end
+    end
+    return sorted
+end
+
+function EditorPlugins:initializePluginScript(plugin)
+    if not plugin.info.script_chunks.plugin then return true end
+    local loaded, result = xpcall(function() return plugin:require("plugin") end, ErrorUtils.traceback)
+    if not loaded then return false, result end
+    if type(result) == "table" and result ~= plugin then
+        for key, value in pairs(result) do plugin[key] = value end
+    end
+    return true
 end
 
 function EditorPlugins:scanDirectory(editor, directory, source)
@@ -279,34 +399,38 @@ function EditorPlugins:scanDirectory(editor, directory, source)
 end
 
 function EditorPlugins:initialize(editor)
+    for _, plugin in ipairs(self.plugin_order) do self:disablePlugin(plugin) end
     self:clearPluginHooks()
     self:reset()
     self.editor = editor
     love.filesystem.createDirectory(self.directory)
     self:scanDirectory(editor, self.debug_directory, "debug")
     self:scanDirectory(editor, self.directory, "user")
+    self.plugin_order = self:sortPlugins(editor)
 
     for _, plugin in ipairs(self.plugin_order) do
-        local hooks_loaded, hooks_message = xpcall(function() plugin:loadHooks() end, tracebackError)
+        if not plugin.disabled then
+            local script_loaded, script_message = self:initializePluginScript(plugin)
+            if not script_loaded then
+                self:disablePlugin(plugin)
+                self:report(editor, "Could not initialize editor plugin script: " .. plugin.id, script_message)
+            end
+        end
+        local hooks_loaded, hooks_message = true
+        if not plugin.disabled then
+            hooks_loaded, hooks_message = xpcall(function() plugin:loadHooks() end, ErrorUtils.traceback)
+        end
         if not hooks_loaded then
-            plugin.disabled = true
-            self:clearPluginHooks(plugin)
+            self:disablePlugin(plugin)
             self:report(editor, "Editor plugin hooks failed: " .. plugin.id, hooks_message)
         end
         local init = plugin.init or plugin.onInit
         if init and not plugin.disabled then
-            local panel_count = #self.panel_definitions
-            local menu_count = #self.menu_definitions
             local success, message = xpcall(function()
                 HookSystem.withOwner(plugin, function() init(plugin, editor) end)
-            end, tracebackError)
+            end, ErrorUtils.traceback)
             if not success then
-                self:clearPluginHooks(plugin)
-                while #self.panel_definitions > panel_count do table.remove(self.panel_definitions) end
-                while #self.menu_definitions > menu_count do table.remove(self.menu_definitions) end
-                plugin.panels = {}
-                editor.settings:removeOwner(plugin)
-                plugin.settings_pages = {}
+                self:disablePlugin(plugin)
                 self:report(editor, "Editor plugin init failed: " .. plugin.id, message)
             end
         end
@@ -315,40 +439,44 @@ end
 
 function EditorPlugins:applyMenuBar(editor)
     for _, definition in ipairs(self.menu_definitions) do
-        local success, message = xpcall(function()
-            if definition.kind == "toggle" then
-                editor.menu_bar:registerToggle(definition.menu_id, definition.id, definition.label,
-                    definition.get_checked, definition.set_checked)
-            elseif definition.kind == "provider" then
-                editor.menu_bar:registerProvider(definition.menu_id, definition.id, definition.provider)
-            else
-                editor.menu_bar:registerItem(definition.menu_id, definition.id, definition.label,
-                    definition.options)
+        if not definition.plugin.disabled then
+            local success, message = xpcall(function()
+                if definition.kind == "toggle" then
+                    editor.menu_bar:registerToggle(definition.menu_id, definition.id, definition.label,
+                        definition.get_checked, definition.set_checked)
+                elseif definition.kind == "provider" then
+                    editor.menu_bar:registerProvider(definition.menu_id, definition.id, definition.provider)
+                else
+                    editor.menu_bar:registerItem(definition.menu_id, definition.id, definition.label,
+                        definition.options)
+                end
+            end, ErrorUtils.traceback)
+            if not success then
+                self:report(editor, "Could not register menu extension from plugin: " .. definition.plugin.id, message)
             end
-        end, tracebackError)
-        if not success then
-            self:report(editor, "Could not register menu extension from plugin: " .. definition.plugin.id, message)
         end
     end
 end
 
 function EditorPlugins:createPanels(editor)
     for _, definition in ipairs(self.panel_definitions) do
-        local success, content = xpcall(function()
-            return definition.content_factory(editor, definition.plugin)
-        end, tracebackError)
-        if success and isClass(content) and content:includes(EditorControl) then
-            local options = TableUtils.copy(definition.options, true)
-            options.region = nil
-            if options.recoverable == nil then options.recoverable = true end
-            local panel = EditorPanel(definition.panel_id, definition.title, content, options)
-            panel.editor_plugin = definition.plugin
-            panel.editor_plugin_id = definition.id
-            editor.dockspace:registerPanel(panel, definition.region)
-            definition.panel = panel
-        else
-            self:report(editor, "Could not create panel from editor plugin: " .. definition.plugin.id,
-                success and ("Panel '" .. definition.id .. "' did not return an EditorControl") or content)
+        if not definition.plugin.disabled then
+            local success, content = xpcall(function()
+                return definition.content_factory(editor, definition.plugin)
+            end, ErrorUtils.traceback)
+            if success and isClass(content) and content:includes(EditorControl) then
+                local options = TableUtils.copy(definition.options, true)
+                options.region = nil
+                if options.recoverable == nil then options.recoverable = true end
+                local panel = EditorPanel(definition.panel_id, definition.title, content, options)
+                panel.editor_plugin = definition.plugin
+                panel.editor_plugin_id = definition.id
+                editor.dockspace:registerPanel(panel, definition.region)
+                definition.panel = panel
+            else
+                self:report(editor, "Could not create panel from editor plugin: " .. definition.plugin.id,
+                    success and ("Panel '" .. definition.id .. "' did not return an EditorControl") or content)
+            end
         end
     end
 end
@@ -367,6 +495,7 @@ function EditorPlugins:getPlugins()
 end
 
 function EditorPlugins:shutdown(editor)
+    for _, plugin in ipairs(self.plugin_order) do self:disablePlugin(plugin) end
     self:clearPluginHooks()
     if self.editor == editor then self.editor = nil end
 end

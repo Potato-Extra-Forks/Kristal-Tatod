@@ -2,28 +2,6 @@
 ---@overload fun(editor: table, value?: table, options?: table): EditorTableInput
 local EditorTableInput, super = Class(EditorControl)
 
-local function sortedKeys(value)
-    local keys = {}
-    for key in pairs(value or {}) do table.insert(keys, key) end
-    table.sort(keys, function(a, b)
-        if type(a) == type(b) then
-            if type(a) == "number" or type(a) == "string" then return a < b end
-            return tostring(a) < tostring(b)
-        end
-        return type(a) < type(b)
-    end)
-    return keys
-end
-
-local function isArray(value)
-    local count, maximum = 0, 0
-    for key in pairs(value or {}) do
-        if type(key) ~= "number" or key < 1 or key % 1 ~= 0 then return false end
-        count, maximum = count + 1, math.max(maximum, key)
-    end
-    return count == maximum
-end
-
 local function displayEntry(value)
     if type(value) == "string" then return value end
     return Registry.editor_properties:getDisplayValue("value", value)
@@ -79,7 +57,7 @@ end
 
 function EditorTableInput:rebuildRows()
     self:clearRows()
-    for _, key in ipairs(sortedKeys(self.value)) do
+    for _, key in ipairs(TableUtils.getSortedKeys(self.value)) do
         local entry_key = key
         local key_input = self:addChild(EditorTextInput({
             on_submit = function(input) self:renameEntry(entry_key, input) end
@@ -133,7 +111,7 @@ end
 function EditorTableInput:addEntry()
     local candidate = TableUtils.copy(self.value, true)
     local key
-    if isArray(candidate) then
+    if TableUtils.isContiguousArray(candidate) then
         key = #candidate + 1
     else
         key = "key"

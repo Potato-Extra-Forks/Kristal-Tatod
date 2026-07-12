@@ -1,7 +1,6 @@
 ---@class EditorPropertyRegistry : Class
 ---@overload fun(): EditorPropertyRegistry
 local EditorPropertyRegistry = Class()
-local sortedTableKeys, isContiguousArray
 
 function EditorPropertyRegistry:init()
     self.types = {}
@@ -169,7 +168,7 @@ function EditorPropertyRegistry:encodeTable(value, context, seen)
     if seen[value] then return nil, "Cannot encode a cyclic editor property table" end
     seen[value] = true
     local result
-    if isContiguousArray(value) then
+    if TableUtils.isContiguousArray(value) then
         result = { kind = "array", values = {} }
         for index = 1, #value do
             local encoded, err = self:encodeDynamic(value[index], context, seen)
@@ -178,7 +177,7 @@ function EditorPropertyRegistry:encodeTable(value, context, seen)
         end
     else
         result = { kind = "object", entries = {} }
-        for _, key in ipairs(sortedTableKeys(value)) do
+        for _, key in ipairs(TableUtils.getSortedKeys(value)) do
             local encoded_key, key_err = self:encodeDynamic(key, context, seen)
             if key_err then seen[value] = nil return nil, key_err end
             local encoded_value, value_err = self:encodeDynamic(value[key], context, seen)
@@ -226,28 +225,6 @@ function EditorPropertyRegistry:compileTable(source)
     return value
 end
 
-sortedTableKeys = function(value)
-    local keys = {}
-    for key in pairs(value) do table.insert(keys, key) end
-    table.sort(keys, function(a, b)
-        if type(a) == type(b) then
-            if type(a) == "number" or type(a) == "string" then return a < b end
-            return tostring(a) < tostring(b)
-        end
-        return type(a) < type(b)
-    end)
-    return keys
-end
-
-isContiguousArray = function(value)
-    local count, maximum = 0, 0
-    for key in pairs(value) do
-        if type(key) ~= "number" or key < 1 or key % 1 ~= 0 then return false end
-        count, maximum = count + 1, math.max(maximum, key)
-    end
-    return count == maximum
-end
-
 function EditorPropertyRegistry:formatValue(value, indent, seen)
     local value_type = type(value)
     if value_type == "function" then
@@ -267,8 +244,8 @@ function EditorPropertyRegistry:formatValue(value, indent, seen)
     local padding = string.rep("    ", indent)
     local child_padding = string.rep("    ", indent + 1)
     local entries = {}
-    local array = isContiguousArray(value)
-    for _, key in ipairs(sortedTableKeys(value)) do
+    local array = TableUtils.isContiguousArray(value)
+    for _, key in ipairs(TableUtils.getSortedKeys(value)) do
         local formatted = self:formatValue(value[key], indent + 1, seen)
         if array then
             table.insert(entries, child_padding .. formatted)

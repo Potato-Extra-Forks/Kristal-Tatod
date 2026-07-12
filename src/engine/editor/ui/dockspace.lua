@@ -8,10 +8,7 @@ local SPLITTER_SIZE = 5
 local EDGE_TARGET_SIZE = 64
 local FLOATING_RESIZE_SIZE = 6
 
-local function pointInRect(x, y, rect)
-    return rect and x >= rect.x and y >= rect.y
-        and x < rect.x + rect.width and y < rect.y + rect.height
-end
+local pointInRect = MathUtils.pointInRect
 
 local function copyRect(rect)
     return { x = rect.x, y = rect.y, width = rect.width, height = rect.height }

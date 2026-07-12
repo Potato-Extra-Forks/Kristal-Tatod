@@ -69,12 +69,6 @@ function EditorTilesetBrowser:openContextMenu(item, list, x, y)
             label = "Save",
             action = function() self.editor:saveTilesetDocumentToProject(item.data) end
         })
-        table.insert(items, {
-            label = "Save as Native Format",
-            action = function()
-                self.editor:saveTilesetDocumentToProject(item.data, { force_native_path = true })
-            end
-        })
         table.insert(items, { label = "Rename", action = function() list:beginRename(item) end })
         if item.data.virtual then
             table.insert(items, { label = "Remove", action = function()

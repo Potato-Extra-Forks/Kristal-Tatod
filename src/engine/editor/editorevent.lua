@@ -138,7 +138,7 @@ function EditorEvent:drawBounds(alpha)
         end
         love.graphics.polygon("line", points)
     elseif self.data.polyline and #self.data.polyline >= 2 then
-        for _, edge in ipairs(TiledUtils.getPolylineEdges(self.data, #self.data.polyline)) do
+        for _, edge in ipairs(MapUtils.getPolylineEdges(self.data, #self.data.polyline)) do
             local first, second = self.data.polyline[edge[1]], self.data.polyline[edge[2]]
             love.graphics.line(first.x or first[1] or 0, first.y or first[2] or 0,
                 second.x or second[1] or 0, second.y or second[2] or 0)

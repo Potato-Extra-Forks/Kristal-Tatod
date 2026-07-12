@@ -1079,7 +1079,7 @@ function Registry.initTilesets()
         self.registerTileset(path, Tileset(data, full_path, FileSystemUtils.getDirname(full_path)))
     end
 
-    EditorFormat.registerTilesets(self)
+    EditorFormatDiscovery.registerTilesets(self)
 
     Kristal.callEvent(KRISTAL_EVENT.onRegisterTilesets)
 end
@@ -1110,8 +1110,8 @@ function Registry.initMaps()
     end
 
 
-    EditorFormat.registerMaps(self)
-    EditorFormat.registerWorlds(self)
+    EditorFormatDiscovery.registerMaps(self)
+    EditorFormatDiscovery.registerWorlds(self)
 
     Kristal.callEvent(KRISTAL_EVENT.onRegisterMaps)
 end

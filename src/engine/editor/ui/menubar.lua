@@ -13,10 +13,6 @@ local BUTTONS = {
     { id = "help", label = "Help" }
 }
 
-local function pointInRect(x, y, rect)
-    return x >= rect.x and y >= rect.y and x < rect.x + rect.width and y < rect.y + rect.height
-end
-
 function EditorMenuBar:init(editor)
     self.editor = editor
     self.x, self.y = 0, 0
@@ -113,10 +109,10 @@ end
 function EditorMenuBar:getCursorType(x, y)
     self:layout()
     for _, item in ipairs(self.item_rects) do
-        if item.enabled and pointInRect(x, y, item) then return "select" end
+        if item.enabled and MathUtils.pointInRect(x, y, item) then return "select" end
     end
     for _, rect in pairs(self.button_rects) do
-        if pointInRect(x, y, rect) then return "select" end
+        if MathUtils.pointInRect(x, y, rect) then return "select" end
     end
     return "default"
 end
@@ -125,14 +121,14 @@ function EditorMenuBar:onMousePressed(x, y, button)
     if button ~= 1 then return self.open_menu ~= nil end
     self:layout()
     for _, rect in ipairs(self.item_rects) do
-        if pointInRect(x, y, rect) then
+        if MathUtils.pointInRect(x, y, rect) then
             if rect.enabled and rect.item.on_activate then rect.item.on_activate() end
             self.open_menu = nil
             return true
         end
     end
     for id, rect in pairs(self.button_rects) do
-        if pointInRect(x, y, rect) then
+        if MathUtils.pointInRect(x, y, rect) then
             if #self:getItems(id) > 0 then
                 self.open_menu = self.open_menu == id and nil or id
             else

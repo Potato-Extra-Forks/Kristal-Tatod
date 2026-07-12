@@ -16,43 +16,9 @@ local TiledUtils = {}
 ---@return number x
 ---@return number x
 ---@return Marker? data
+---@deprecated Use `MapUtils.parseMarkerProperty` instead.
 function TiledUtils.parseMarkerProperty(obj, target, name)
-    if type(target) == "table" then
-        if target.object_id ~= nil then
-            -- Native editor object references retain their optional map id,
-            -- while legacy marker lookup still consumes the local object id.
-            target = target.object_id
-        end
-    end
-    if type(target) == "table" then
-        ---@cast target Position|Marker|TiledObjectRef
-        if target.center_x ~= nil and target.center_y ~= nil then
-            -- This is marker data.
-            return target.center_x, target.center_y, target
-        elseif target.id ~= nil then
-            -- This is a Tiled object reference.
-            ---@cast target TiledObjectRef
-
-            if not Game.world.map:hasMarker(target) then
-                error(string.format("%s at (%d, %d) has invalid position property \"%s\"", ClassUtils.getClassName(obj), obj.x, obj.y, name))
-            end
-
-            return Game.world.map:getMarker(target)
-        elseif target[1] ~= nil and target[2] ~= nil then
-            -- This is a position table.
-            return target[1], target[2], nil
-        else
-            error(string.format("%s at (%d, %d) has invalid position property \"%s\"", ClassUtils.getClassName(obj), obj.x, obj.y, name))
-        end
-    end
-
-    -- Not a table, could be a string or a number (a marker reference)
-
-    if not Game.world.map:hasMarker(target) then
-        error(string.format("%s at (%d, %d) has invalid position property \"%s\"", ClassUtils.getClassName(obj), obj.x, obj.y, name))
-    end
-
-    return Game.world.map:getMarker(target)
+    return MapUtils.parseMarkerProperty(obj, target, name)
 end
 
 ---
@@ -81,25 +47,9 @@ end
 ---@param properties table # The properties table of a Tiled event's data.
 ---@return table result    # The list of property values found.
 ---
+---@deprecated Use `MapUtils.parsePropertyList` instead.
 function TiledUtils.parsePropertyList(id, properties)
-    properties = properties or {}
-    if properties[id] then
-        if type(properties[id]) == "table" and TableUtils.isArray(properties[id]) then
-            -- New Tiled list property. Use as-is.
-            return properties[id]
-        end
-        -- Numberless property found, return it as the only value in the list
-        return { properties[id] }
-    else
-        local result = {}
-        -- Loop through properties with an increasing number suffix
-        local i = 1
-        while properties[id .. i] do
-            table.insert(result, properties[id .. i])
-            i = i + 1
-        end
-        return result
-    end
+    return MapUtils.parsePropertyList(id, properties)
 end
 
 ---
@@ -113,38 +63,9 @@ end
 ---@param properties table # The properties table of a Tiled event's data.
 ---@return table result    # The list of property values found.
 ---
+---@deprecated Use `MapUtils.parsePropertyMultiList` instead.
 function TiledUtils.parsePropertyMultiList(id, properties)
-    if type(properties[id]) == "table" and TableUtils.isArray(properties[id]) then
-        -- New Tiled list properties.
-        for _,v in ipairs(properties[id]) do
-            -- If it's not all nested lists, make it a nested list.
-            if not (type(v) == "table" and TableUtils.isArray(v)) then
-                return { properties[id] }
-            end
-        end
-        -- Use as-is.
-        return properties[id]
-    end
-    local single_list = TiledUtils.parsePropertyList(id, properties)
-    if #single_list > 0 then
-        -- If a shallower list was found (e.g. "id1", "id2" instead of "id1_1", "id1_2"),
-        -- return it as the only value in the list.
-        return { single_list }
-    else
-        local result = {}
-        local i = 1
-        while properties[id .. i .. "_1"] do
-            local list = {}
-            local j = 1
-            while properties[id .. i .. "_" .. j] do
-                table.insert(list, properties[id .. i .. "_" .. j])
-                j = j + 1
-            end
-            table.insert(result, list)
-            i = i + 1
-        end
-        return result
-    end
+    return MapUtils.parsePropertyMultiList(id, properties)
 end
 
 ---
@@ -159,26 +80,9 @@ end
 ---@return boolean inverted   # Whether the result of the check should be inverted.
 ---@return any value          # The value that the flag should be compared to.
 ---
+---@deprecated Use `MapUtils.parseFlagProperties` instead.
 function TiledUtils.parseFlagProperties(flag, inverted, value, default_value, properties)
-    properties = properties or {}
-
-    local result_inverted = false
-    local result_flag = nil
-    local result_value = default_value
-
-    if properties[flag] then
-        -- If the flag property starts with an exclamation mark, the result should
-        -- be inverted and the flag name should be the rest of the string.
-        result_inverted, result_flag = StringUtils.startsWith(properties[flag], "!")
-    end
-    if properties[inverted] then
-        result_inverted = not result_inverted
-    end
-    if properties[value] then
-        result_value = properties[value]
-    end
-
-    return result_flag, result_inverted, result_value
+    return MapUtils.parseFlagProperties(flag, inverted, value, default_value, properties)
 end
 
 ---
@@ -190,11 +94,9 @@ end
 ---@return boolean flip_y    # Whether the tile should be flipped vertically.
 ---@return boolean flip_diag # Whether the tile should be flipped diagonally.
 ---
+---@deprecated Use `MapUtils.unpackTileGid` instead.
 function TiledUtils.parseTileGid(id)
-    return bit.band(id, 0x0FFFFFFF),
-        bit.band(id, 0x80000000) ~= 0,
-        bit.band(id, 0x40000000) ~= 0,
-        bit.band(id, 0x20000000) ~= 0
+    return MapUtils.unpackTileGid(id)
 end
 
 ---
@@ -207,108 +109,16 @@ end
 ---@param properties? table  # A table defining additional properties for the collider.
 ---@return Collider collider # The new Collider instance.
 ---
+---@deprecated Use `MapUtils.colliderFromShape` instead.
 function TiledUtils.colliderFromShape(parent, data, x, y, properties)
-    x, y = x or 0, y or 0
-    properties = properties or {}
-
-    -- Optional properties for collider behaviour
-    -- "outside" is the same as enabling both "inverted" and "inside"
-    local mode = {
-        invert = properties["inverted"] or properties["outside"] or false,
-        inside = properties["inside"] or properties["outside"] or false
-    }
-
-    local rotation = math.rad((tonumber(data.rotation) or 0) % 360)
-    local cosine, sine = math.cos(rotation), math.sin(rotation)
-    local width, height = data.width or 0, data.height or 0
-    local function transformPoint(point_x, point_y)
-        return x + point_x * cosine - point_y * sine,
-            y + point_x * sine + point_y * cosine
-    end
-    local function polygonCollider(points)
-        local transformed = {}
-        for _, point in ipairs(points) do
-            local point_x, point_y = transformPoint(point.x or point[1] or 0, point.y or point[2] or 0)
-            table.insert(transformed, { point_x, point_y })
-        end
-        return PolygonCollider(parent, transformed, mode)
-    end
-
-    local current_hitbox
-    if data.shape == "rectangle" then
-        if rotation == 0 then
-            current_hitbox = Hitbox(parent, x, y, width, height, mode)
-        else
-            current_hitbox = polygonCollider({
-                { x = 0, y = 0 }, { x = width, y = 0 },
-                { x = width, y = height }, { x = 0, y = height }
-            })
-        end
-
-    elseif data.shape == "polyline" or data.shape == "line" then
-        -- For polylines, create a ColliderGroup using a series of LineColliders
-        local line_colliders = {}
-        local points = data.polyline or data.shape_data and data.shape_data.points or {}
-
-        for _, edge in ipairs(TiledUtils.getPolylineEdges(data, #points)) do
-            local i, j = edge[1], edge[2]
-            -- Create a LineCollider using the current and next point of the polyline
-            local x1, y1 = transformPoint(points[i].x or points[i][1] or 0,
-                points[i].y or points[i][2] or 0)
-            local x2, y2 = transformPoint(points[j].x or points[j][1] or 0,
-                points[j].y or points[j][2] or 0)
-            table.insert(line_colliders, LineCollider(parent, x1, y1, x2, y2, mode))
-        end
-
-        current_hitbox = ColliderGroup(parent, line_colliders)
-
-    elseif data.shape == "polygon" then
-        current_hitbox = polygonCollider(data.polygon
-            or data.shape_data and data.shape_data.points or {})
-    elseif data.shape == "ellipse" then
-        local points = {}
-        local radius_x, radius_y = width / 2, height / 2
-        for index = 0, 23 do
-            local angle = index / 24 * math.pi * 2
-            table.insert(points, {
-                x = radius_x + math.cos(angle) * radius_x,
-                y = radius_y + math.sin(angle) * radius_y
-            })
-        end
-        current_hitbox = polygonCollider(points)
-    elseif data.shape == "point" or data.point == true then
-        current_hitbox = PointCollider(parent, x, y, mode)
-    end
-
-    if current_hitbox and properties["enabled"] == false then
-        current_hitbox.collidable = false
-    end
-
-    return current_hitbox
+    return MapUtils.colliderFromShape(parent, data, x, y, properties)
 end
-
 --- Resolves explicit polyline point-index connections, falling back to a
 --- conventional consecutive path when no topology is stored.
+---@deprecated Use `MapUtils.getPolylineEdges` instead.
 function TiledUtils.getPolylineEdges(data, point_count)
-    local shape_data = data and data.shape_data or data or {}
-    local source = shape_data.edges
-    local result = {}
-    for _, edge in ipairs(type(source) == "table" and source or {}) do
-        local first = tonumber(edge.from or edge[1])
-        local second = tonumber(edge.to or edge[2])
-        if first and second and first >= 1 and second >= 1
-            and first <= point_count and second <= point_count and first ~= second then
-            table.insert(result, { first, second })
-        end
-    end
-    if source == nil then
-        for index = 1, math.max(0, point_count - 1) do
-            table.insert(result, { index, index + 1 })
-        end
-    end
-    return result
+    return MapUtils.getPolylineEdges(data, point_count)
 end
-
 ---@alias TiledUtils.PathFailReason
 ---| "not under prefix"
 ---| "path outside root"

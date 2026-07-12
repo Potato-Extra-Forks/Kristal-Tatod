@@ -28,10 +28,6 @@ local function containsNode(folder, candidate)
     return false
 end
 
-local function trimmed(value)
-    return tostring(value or ""):match("^%s*(.-)%s*$")
-end
-
 function EditorTreeList:init(options)
     options = options or {}
     super.init(self, options.x, options.y, options.width or 220, options.height or 240)
@@ -272,7 +268,7 @@ function EditorTreeList:finishRename(commit, from_blur)
     local node = self.rename_node
     if not node then return false end
     local old_name = node.name
-    local new_name = trimmed(self.rename_input.value)
+    local new_name = StringUtils.trim(tostring(self.rename_input.value or ""))
     if commit and new_name ~= "" then node.name = new_name end
     self.rename_node = nil
     self.rename_input.visible = false

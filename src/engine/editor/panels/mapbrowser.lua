@@ -203,12 +203,6 @@ function EditorMapBrowser:openNodeContextMenu(node, tree, x, y)
                 label = "Save",
                 action = function() self.editor:saveMapDocumentToProject(document) end
             })
-            table.insert(items, {
-                label = "Save as Native Format",
-                action = function()
-                    self.editor:saveMapDocumentToProject(document, { force_native_path = true })
-                end
-            })
         end
     end
     if not node or node.type == "folder" then

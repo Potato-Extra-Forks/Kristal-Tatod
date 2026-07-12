@@ -505,7 +505,7 @@ function EditorMapView:drawSelectedObject()
             if selection.data.polygon then
                 love.graphics.polygon("line", coordinates)
             else
-                for _, edge in ipairs(TiledUtils.getPolylineEdges(selection.data, #points)) do
+                for _, edge in ipairs(MapUtils.getPolylineEdges(selection.data, #points)) do
                     local first, second = points[edge[1]], points[edge[2]]
                     love.graphics.line(first.x or first[1] or 0, first.y or first[2] or 0,
                         second.x or second[1] or 0, second.y or second[2] or 0)

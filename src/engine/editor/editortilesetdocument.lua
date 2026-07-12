@@ -14,9 +14,15 @@ function EditorTilesetDocument:init(editor, id, tileset, data)
     self.editor = editor
     self.id = id
     self.tileset = tileset
-    self.data = data or tileset and tileset.data or {
-        name = id, tilewidth = 40, tileheight = 40, tilecount = 0, columns = 1,
-        properties = {}, tiles = {}, wangsets = {}
+    self.data = data or tileset and tileset.data
+    if tileset and tileset.reader and tileset.reader.LEGACY_FORMAT then
+        local converted, reason = EditorTilesetReader.convertLegacyData(self.data)
+        if not converted then error(reason, 2) end
+        self.data = converted
+    end
+    self.data = self.data or {
+        name = id, tile_width = 40, tile_height = 40, tile_count = 0, tile_columns = 1,
+        properties = {}, tiles = {}, terrains = {}
     }
     self.data.properties = self.data.properties or {}
     self.data.__editor_property_types = self.data.__editor_property_types or {}
@@ -47,15 +53,15 @@ function EditorTilesetDocument:isDirty()
 end
 
 function EditorTilesetDocument:getFormatContext()
-    return EditorFormat.getTilesetContext(self)
+    return EditorFormatDocument.getTilesetContext(self)
 end
 
 function EditorTilesetDocument:buildEditorFormatData(options)
-    return EditorFormat.buildTilesetData(self, options)
+    return EditorFormatDocument.buildTilesetData(self, options)
 end
 
 function EditorTilesetDocument:save(path, options)
-    return EditorFormat.saveTilesetDocument(self, path, options)
+    return EditorFormatDocument.saveTileset(self, path, options)
 end
 
 function EditorTilesetDocument:adoptSavedData(data, tileset)
@@ -73,22 +79,19 @@ function EditorTilesetDocument:getName()
 end
 
 function EditorTilesetDocument:getTileCount()
-    return self.tileset and self.tileset.id_count or self.data.tilecount or 0
+    return self.data.tile_count or self.tileset and self.tileset.id_count or 0
 end
 
 function EditorTilesetDocument:getColumns()
-    return math.max(1, self.tileset and self.tileset.columns or self.data.columns or 1)
+    return math.max(1, self.data.tile_columns or self.tileset and self.tileset.columns or 1)
 end
 
 function EditorTilesetDocument:getPaletteTileSize()
-    local grid = self.data.grid or {}
-    local width = tonumber(grid.width)
+    local width = tonumber(self.data.tile_width)
         or (self.tileset and self.tileset.tile_width)
-        or tonumber(self.data.tilewidth)
         or 40
-    local height = tonumber(grid.height)
+    local height = tonumber(self.data.tile_height)
         or (self.tileset and self.tileset.tile_height)
-        or tonumber(self.data.tileheight)
         or 40
     return math.max(1, width), math.max(1, height)
 end
@@ -123,8 +126,8 @@ end
 
 function EditorTilesetDocument:addCollisionShape(tile)
     local shapes = self:getCollisionShapes(tile)
-    local width = self.data.tilewidth or 40
-    local height = self.data.tileheight or 40
+    local width = self.data.tile_width or 40
+    local height = self.data.tile_height or 40
     local shape = { x = 0, y = 0, width = width, height = height, shape = "rectangle", properties = {} }
     table.insert(shapes, shape)
     return shape
@@ -143,12 +146,8 @@ function EditorTilesetDocument:addAnimationFrame(tile, tile_id)
 end
 
 function EditorTilesetDocument:getTerrainSets()
-    if self.data.version ~= nil or self.data.terrains then
-        self.data.terrains = self.data.terrains or {}
-        return self.data.terrains
-    end
-    self.data.wangsets = self.data.wangsets or {}
-    return self.data.wangsets
+    self.data.terrains = self.data.terrains or {}
+    return self.data.terrains
 end
 
 function EditorTilesetDocument:addTerrainSet()
@@ -157,15 +156,8 @@ function EditorTilesetDocument:addTerrainSet()
         if terrain.id then used[tostring(terrain.id)] = true end
     end
     local name = "New Terrain Set"
-    local native = self.data.version ~= nil or self.data.terrains ~= nil
     local set = { id = EditorFormat.uniqueSlug(name, used, "terrain"), name = name,
-        type = "mixed", properties = {} }
-    if native then
-        set.terrain_variants, set.terrain_tiles = {}, {}
-        self.data.terrains = self.data.terrains or {}
-    else
-        set.wangcolors, set.wangtiles = {}, {}
-    end
+        type = "mixed", properties = {}, terrain_variants = {}, terrain_tiles = {} }
     table.insert(self:getTerrainSets(), set)
     return set
 end
@@ -173,35 +165,10 @@ end
 function EditorTilesetDocument:getPropertiesTarget()
     local data = self.data
     local function numberField(label, key, readonly)
-        return { label = label, readonly = readonly, compact = true,
-            get = function() return data[key] or 0 end,
-            set = function(value)
-                local number = tonumber(value)
-                if not number or readonly then return false end
-                data[key] = number
-                return true
-            end }
+        return EditorPropertyFields.number(data, label, key, { readonly = readonly })
     end
     local function offsetField(label, key)
-        return { label = label, compact = true,
-            get = function() return data.tileoffset and data.tileoffset[key] or 0 end,
-            set = function(value)
-                value = tonumber(value)
-                if not value then return false end
-                data.tileoffset = data.tileoffset or {}
-                data.tileoffset[key] = value
-                return true
-            end }
-    end
-    local function gridField(label, key, fallback, compact)
-        return { label = label, compact = compact == true,
-            get = function() return data.grid and data.grid[key] or fallback end,
-            set = function(value)
-                if key ~= "orientation" then value = tonumber(value) if not value then return false end end
-                data.grid = data.grid or {}
-                data.grid[key] = value
-                return true
-            end }
+        return EditorPropertyFields.number(data, label, key)
     end
     return {
         title = "Tileset: " .. self:getName(),
@@ -217,21 +184,17 @@ function EditorTilesetDocument:getPropertiesTarget()
                 set = function() return false end },
             { label = "Image", get = function() return data.image or "" end,
                 set = function(value) data.image = value ~= "" and value or nil return true end },
-            numberField("Tile Width", "tilewidth"), numberField("Tile Height", "tileheight"),
-            numberField("Tile Count", "tilecount"), numberField("Columns", "columns"),
+            numberField("Tile Width", "tile_width"), numberField("Tile Height", "tile_height"),
+            numberField("Tile Count", "tile_count"), numberField("Columns", "tile_columns"),
             numberField("Margin", "margin"), numberField("Spacing", "spacing"),
-            { label = "Object Alignment", get = function() return data.objectalignment or "unspecified" end,
-                set = function(value) data.objectalignment = value return true end },
-            offsetField("Drawing Offset X", "x"), offsetField("Drawing Offset Y", "y"),
-            { label = "Background Color", get = function() return data.backgroundcolor or "" end,
-                set = function(value) data.backgroundcolor = value return true end },
-            gridField("Orientation", "orientation", "orthogonal"),
-            gridField("Grid Width", "width", data.tilewidth or 40, true),
-            gridField("Grid Height", "height", data.tileheight or 40, true),
-            { label = "Tile Render Size", get = function() return data.tilerendersize or "tile" end,
-                set = function(value) data.tilerendersize = value return true end },
-            { label = "Fill Mode", get = function() return data.fillmode or "stretch" end,
-                set = function(value) data.fillmode = value return true end }
+            { label = "Object Alignment", get = function() return data.alignment or "unspecified" end,
+                set = function(value) data.alignment = value return true end },
+            offsetField("Drawing Offset X", "tile_offset_x"),
+            offsetField("Drawing Offset Y", "tile_offset_y"),
+            { label = "Tile Render Size", get = function() return data.render_size or "tile" end,
+                set = function(value) data.render_size = value return true end },
+            { label = "Fill Mode", get = function() return data.fill_mode or "stretch" end,
+                set = function(value) data.fill_mode = value return true end }
         }
     }
 end
@@ -247,14 +210,14 @@ function EditorTilesetDocument:getTilePropertiesTarget(tile)
         property_types = source.__editor_property_types,
         fields = {
             { label = "ID", readonly = true, get = function() return tile.id end, set = function() return false end },
-            { label = "Class", get = function() return source.class or source.type or "" end,
-                set = function(value) source.class = value return true end },
+            { label = "Type", get = function() return source.type or "" end,
+                set = function(value) source.type = value return true end },
             { label = "Probability", get = function() return source.probability or 1 end,
                 set = function(value) local number = tonumber(value) if not number then return false end source.probability = number return true end },
             { label = "Width", readonly = true, compact = true,
-                get = function() return source.width or self.data.tilewidth or 0 end, set = function() return false end },
+                get = function() return source.width or self.data.tile_width or 0 end, set = function() return false end },
             { label = "Height", readonly = true, compact = true,
-                get = function() return source.height or self.data.tileheight or 0 end, set = function() return false end },
+                get = function() return source.height or self.data.tile_height or 0 end, set = function() return false end },
             { label = "Terrain", get = function()
                     return type(source.terrain) == "table" and table.concat(source.terrain, ",") or source.terrain or ""
                 end,

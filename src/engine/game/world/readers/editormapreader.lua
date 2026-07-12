@@ -4,16 +4,7 @@ local EditorMapReader, super = Class(MapReader)
 
 EditorMapReader.FORMAT = "editor"
 EditorMapReader.LEGACY_FORMAT = false
-EditorMapReader.operations = {}
-for id, operation in pairs(TiledMapReader.operations) do
-    EditorMapReader.operations[id] = operation
-end
-
-local function getLayerKind(layer)
-    if layer._editor_kind_id or layer.kind then return layer._editor_kind_id or layer.kind end
-    local layer_type = Registry.getLayerType(layer._editor_type_id or layer.type)
-    return layer_type and layer_type.kind or "object"
-end
+EditorMapReader.operations = MapReader.copyOperations()
 
 function EditorMapReader:initialize(data)
     local map = self.map
@@ -33,37 +24,30 @@ function EditorMapReader:initialize(data)
     map.bg_color = TableUtils.copy(data.background_color or { 0, 0, 0, 0 }, true)
 
     local added = {}
-    local function findTilesets(layers)
-        for _, layer in ipairs(layers or {}) do
-            if getLayerKind(layer) == "tile" and layer.tileset and not added[layer.tileset] then
-                map:addTileset(layer.tileset)
-                added[layer.tileset] = true
-            end
-            findTilesets(layer.layers)
+    MapUtils.walkLayers(data.layers, function(layer)
+        if Registry.layer_types:getLayerKind(layer) == "tile" and layer.tileset and not added[layer.tileset] then
+            map:addTileset(layer.tileset)
+            added[layer.tileset] = true
         end
-    end
-    findTilesets(data.layers)
+    end)
     return true
 end
 
 function EditorMapReader:read(data)
     local map = self.map
     local depth = map.depth_per_layer
-    local function loadLayers(layers)
-        for _, layer in ipairs(layers or {}) do
-            if getLayerKind(layer) == "group" then
-                if layer.visible ~= false then loadLayers(layer.layers) end
-            elseif layer.visible ~= false then
-                local layer_depth = layer._editor_depth_override or depth
-                map.layers[layer.name] = layer_depth
-                if not Kristal.callEvent(KRISTAL_EVENT.loadLayer, map, layer, layer_depth) then
-                    map:loadLayer(layer, layer_depth)
-                end
-                if not (layer.properties and layer.properties.thin) then depth = depth + map.depth_per_layer end
+    MapUtils.walkLayers(data.layers, function(layer)
+        if Registry.layer_types:getLayerKind(layer) == "group" then
+            return layer.visible ~= false
+        elseif layer.visible ~= false then
+            local layer_depth = layer._editor_depth_override or depth
+            map.layers[layer.name] = layer_depth
+            if not Kristal.callEvent(KRISTAL_EVENT.loadLayer, map, layer, layer_depth) then
+                map:loadLayer(layer, layer_depth)
             end
+            if not (layer.properties and layer.properties.thin) then depth = depth + map.depth_per_layer end
         end
-    end
-    loadLayers(data.layers)
+    end)
     map.next_layer = depth
     return true
 end
@@ -78,14 +62,6 @@ end
 
 function EditorMapReader.operations.isLayerType(map, layer, type_id)
     return layer._editor_type_id == type_id
-end
-
-function EditorMapReader.operations.getTileset(map, id)
-    if type(id) == "number" then return TiledMapReader.operations.getTileset(map, id) end
-    for _, tileset in ipairs(map.tilesets) do
-        if tileset.id == id or tileset.name == id then return tileset, map.tileset_gids[tileset] end
-    end
-    return nil, 0
 end
 
 function EditorMapReader.operations.createTileLayer(map, layer)
@@ -121,8 +97,15 @@ function EditorMapReader.operations.createTileLayer(map, layer)
     return TileLayer(map, runtime_layer)
 end
 
+function EditorMapReader.operations.createTileObject(map, data, x, y, width, height)
+    local tileset = map:getTileset(data.tileset)
+    if not tileset then return nil end
+    return TileObject(tileset, data.tile_id, x or data.x, y or data.y,
+        width or data.width, height or data.height, math.rad(data.rotation or 0), false, false)
+end
+
 function EditorMapReader.operations.loadLayer(map, layer, depth)
-    local kind = getLayerKind(layer)
+    local kind = Registry.layer_types:getLayerKind(layer)
     local layer_type = Registry.getLayerType(layer._editor_type_id or layer.type)
     if layer_type and layer_type.load then
         return layer_type.load(map, layer, depth, map.reader, layer_type)
@@ -140,17 +123,11 @@ end
 function EditorMapReader.operations.loadTextureFromImagePath(map, filename)
     local texture, resolved_id = Assets.resolveTextureReference(filename)
     if texture then return true, resolved_id end
-    local success, relative_id, final_path = TiledUtils.relativePathToAssetId(
-        "assets/sprites", filename, map.full_map_path)
-    if success then
-        texture, resolved_id = Assets.resolveTextureReference(relative_id)
-        if texture then return true, resolved_id end
-    end
-    return false, "Could not resolve map image path '" .. tostring(final_path or filename) .. "'"
+    return false, "Could not resolve map image asset '" .. tostring(filename) .. "'"
 end
 
 function EditorMapReader.convertLegacyData(data, options)
-    return EditorFormat.convertTiledMap(data, options)
+    return TiledEditorFormatConverter.convertMap(data, options)
 end
 
 function EditorMapReader.saveData(data, path, options)

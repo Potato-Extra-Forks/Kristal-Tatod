@@ -17,6 +17,7 @@ EditorFormat.TILE_FLIP_VERTICAL = 0x40000000
 EditorFormat.TILE_ROTATE = 0x20000000
 EditorFormat.TILE_ID_MASK = 0x1FFFFFFF
 EditorFormat.CHUNK_SIZE = 16
+EditorFormat.MILLISECONDS_PER_SECOND = 1000
 
 function EditorFormat.slugId(value, fallback)
     local id = tostring(value or ""):lower()
@@ -208,7 +209,7 @@ EditorFormat.ORDERING = {
     },
     shape = {
         "type",
-        "shape_data" --- table value- points for polygons, bounds for boxes, radius for circles etc
+        "shape_data"
     },
     terrain_variant = {
         "id",
@@ -237,41 +238,20 @@ EditorFormat.ORDERING = {
     }
 }
 
---- shape_data stuff. x/y is offset from object position. points and such are in local coordinates around shape center.
+--- Shape position, size, and rotation live on the object. Shape data only stores
+--- topology that cannot be represented by those common object fields.
 EditorFormat.SHAPE_DATA_TYPES = {
-    point = {
-        "x",
-        "y"
-    },
+    point = {},
     line = {
-        "x",
-        "y",
         "points",
         "thickness"
     },
-    rectangle = {
-        "x",
-        "y",
-        "bounds",
-        "rotation"
-    },
-    ellipse = {
-        "x",
-        "y",
-        "radius",
-        "radius_x", -- collapses into just one 'radius' value for a circle
-        "radius_y", -- ^^^
-        "rotation"
-    },
+    rectangle = {},
+    ellipse = {},
     polygon = {
-        "x",
-        "y",
-        "points",
-        "rotation"
+        "points"
     },
     polyline = {
-        "x",
-        "y",
         "points",
         "edges",
         "thickness"
@@ -303,18 +283,6 @@ local SERIALIZATION_METADATA = {
     _editor_property_order = true,
     _editor_property_set = true
 }
-
-local function isArray(value)
-    if rawget(value, 1) ~= nil or next(value) == nil then
-        local count = 0
-        for key in pairs(value) do
-            if type(key) ~= "number" or key < 1 or key % 1 ~= 0 then return false end
-            count = count + 1
-        end
-        return count == #value
-    end
-    return false
-end
 
 local function getOrdering(schema, value)
     if schema == "layer" then
@@ -368,7 +336,8 @@ local function encodeJSONValue(value, schema, options, depth, seen)
     local child_padding = pretty and string.rep(indent, depth + 1) or ""
     local array_schema = schema and schema:match("^array:(.+)$")
     local compact_width = schema and tonumber(schema:match("^compact_array:(%d+)$"))
-    local array = array_schema ~= nil or compact_width ~= nil or schema == nil and isArray(value)
+    local array = array_schema ~= nil or compact_width ~= nil
+        or schema == nil and TableUtils.isContiguousArray(value)
     local parts = {}
 
     if array then
@@ -445,11 +414,6 @@ local function copySerializable(value, seen)
     return result
 end
 
-local function clearFields(value, fields)
-    for _, field in ipairs(fields) do value[field] = nil end
-    return value
-end
-
 local function decodeOwnerProperties(owner, context)
     local entries = owner.properties or {}
     if type(entries[1]) ~= "table" or entries[1].name == nil then
@@ -524,7 +488,7 @@ end
 
 encodeObject = function(object, context)
     local result = copySerializable(object)
-    clearFields(result, { "class", "point", "ellipse", "polygon", "polyline", "shape_data", "__editor_fx" })
+    TableUtils.clearFields(result, { "class", "point", "ellipse", "polygon", "polyline", "shape_data", "__editor_fx" })
     result.type = object.type or object.class
     context.object_ids = context.object_ids or {}
     context.object_id_state = context.object_id_state or { next_id = 1 }
@@ -546,13 +510,6 @@ encodeObject = function(object, context)
     end
     if #result.fx == 0 then result.fx = nil end
     return result
-end
-
-local function getLayerKind(layer)
-    local kind = layer._editor_kind_id or layer.kind
-    if kind then return kind end
-    local layer_type = Registry.getLayerType(layer._editor_type_id or layer.type)
-    return layer_type and layer_type.kind or "object"
 end
 
 decodeLayer = function(source, context)
@@ -600,14 +557,14 @@ decodeLayer = function(source, context)
 end
 
 encodeLayer = function(source, context)
-    local kind = getLayerKind(source)
+    local kind = Registry.layer_types:getLayerKind(source)
     if kind == "tile" and not source.chunks and type(source.data) == "table" and #source.data > 0 then
         return nil, "Legacy tile data must be converted to per-tileset packed chunks before saving"
     end
     local candidate, reason = Registry.layer_types:encodeKind(kind, source, context)
     if not candidate then return nil, reason end
     local result = copySerializable(candidate)
-    clearFields(result, {
+    TableUtils.clearFields(result, {
         "class", "offsetx", "offsety", "opacity", "parallaxx", "parallaxy", "repeatx", "repeaty",
         "draworder", "imagewidth", "imageheight", "transparentcolor", "tintcolor", "width", "height",
         "data", "encoding",
@@ -679,7 +636,7 @@ end
 
 local function encodeTile(tile, context)
     local result = copySerializable(tile)
-    clearFields(result, {
+    TableUtils.clearFields(result, {
         "class", "image", "imagewidth", "imageheight", "animation", "objectgroup", "terrain",
         "__editor_property_types", "__editor_property_order"
     })
@@ -710,76 +667,6 @@ local function encodeTile(tile, context)
     return result
 end
 
--- SECTION : Discovery
-
-local function getContentDirectories(relative_path)
-    local result = {}
-    local function add(path)
-        if love.filesystem.getInfo(path, "directory") then table.insert(result, path) end
-    end
-    add(relative_path)
-    add("scripts/" .. relative_path)
-    if Mod then
-        for _, library in Kristal.iterLibraries() do
-            if library.info and library.info.path then add(library.info.path .. "/scripts/" .. relative_path) end
-        end
-        add(Mod.info.path .. "/scripts/" .. relative_path)
-    end
-    return result
-end
-
-local function discoverJSON(relative_path, extension, decoder, callback)
-    for _, directory in ipairs(getContentDirectories(relative_path)) do
-        for _, relative in ipairs(FileSystemUtils.getFilesRecursive(directory, extension)) do
-            local path = directory .. "/" .. relative .. extension
-            local source, read_error = love.filesystem.read(path)
-            if not source then error(string.format("Could not read '%s': %s", path, tostring(read_error)), 2) end
-            local data, reason = decoder(source, path)
-            if not data then error(reason, 2) end
-            callback(data, relative, path)
-        end
-    end
-end
-
----@param registry Registry
-function EditorFormat.registerMaps(registry)
-    discoverJSON(registry.paths.maps, EditorFormat.MAP_EXTENSION, EditorFormat.decodeMap,
-        function(data, relative, path)
-            data.id = data.id or relative
-            data.full_path = path
-            registry.registerMapData(data.id, data, EditorMapReader)
-        end)
-    return true
-end
-
----@param registry Registry
-function EditorFormat.registerTilesets(registry)
-    discoverJSON(registry.paths.tilesets, EditorFormat.TILESET_EXTENSION, EditorFormat.decodeTileset,
-        function(data, relative, path)
-            data.id = data.id or relative
-            data.full_path = path
-            data.__tileset_reader = EditorTilesetReader
-            registry.registerTileset(data.id, Tileset(data, path, FileSystemUtils.getDirname(path)))
-        end)
-    return true
-end
-
-function EditorFormat.registerWorlds(registry)
-    discoverJSON(EditorFormat.WORLD_DIRECTORY, EditorFormat.WORLD_EXTENSION, EditorFormat.decodeWorld,
-        function(data, relative)
-            data.id = data.id or relative
-            local world = EditorWorld(data.id)
-            world.name = data.name or data.id
-            world.data = data
-            world.properties = data.properties or {}
-            world.__editor_property_types = data.__editor_property_types or {}
-            for _, map in ipairs(data.maps or {}) do
-                world:addMap(map.map, map.x, map.y, { explicit_companion = true })
-            end
-            registry.registerEditorWorld(data.id, world)
-        end)
-    return true
-end
 
 -- SECTION : Encode/Decode
 
@@ -815,7 +702,7 @@ end
 function EditorFormat.encodeMap(data, options)
     options = options or {}
     local result = copySerializable(data)
-    clearFields(result, {
+    TableUtils.clearFields(result, {
         "tilewidth", "tileheight", "backgroundcolor", "parallaxoriginx", "parallaxoriginy", "tilesets",
         "orientation", "renderorder", "infinite", "nextlayerid", "nextobjectid", "tiledversion",
         "luaversion", "compressionlevel", "class", "__map_reader", "full_path"
@@ -872,16 +759,8 @@ function EditorFormat.decodeTileset(source, path, options)
             if not success then return nil, reason end
         end
     end
-    data.tilewidth = data.tile_width
-    data.tileheight = data.tile_height
-    data.tilecount = data.tile_count
-    data.columns = data.tile_columns
     data.margin = data.margin or 0
     data.spacing = data.spacing or 0
-    data.objectalignment = data.alignment
-    data.tilerendersize = data.render_size
-    data.fillmode = data.fill_mode
-    data.tileoffset = { x = data.tile_offset_x or 0, y = data.tile_offset_y or 0 }
     data.__tileset_reader = EditorTilesetReader
     return data
 end
@@ -891,35 +770,27 @@ end
 function EditorFormat.encodeTileset(data, options)
     options = options or {}
     local result = copySerializable(data)
-    clearFields(result, {
+    TableUtils.clearFields(result, {
         "tilewidth", "tileheight", "tilecount", "columns", "objectalignment", "tilerendersize",
         "fillmode", "tileoffset", "imagewidth", "imageheight", "transparentcolor", "grid",
         "wangsets", "transformations", "tiledversion", "class", "__tileset_reader", "full_path"
     })
     result.version = EditorFormat.TILESET_FORMAT_VERSION
     result.kristal_version = result.kristal_version or tostring(Kristal.Version)
-    result.tile_width = data.tile_width or data.tilewidth
-    result.tile_height = data.tile_height or data.tileheight
-    result.tile_count = data.tile_count or data.tilecount
-    result.tile_columns = data.tile_columns or data.columns
+    result.tile_width = data.tile_width
+    result.tile_height = data.tile_height
+    result.tile_count = data.tile_count
+    result.tile_columns = data.tile_columns
     result.tile_rows = data.tile_rows or (result.tile_columns and result.tile_columns > 0
         and math.ceil((result.tile_count or 0) / result.tile_columns) or 0)
-    result.alignment = data.alignment or data.objectalignment
-    result.render_size = data.render_size or data.tilerendersize
-    result.fill_mode = data.fill_mode or data.fillmode
-    result.tile_offset_x = data.tile_offset_x or data.tileoffset and data.tileoffset.x
-    result.tile_offset_y = data.tile_offset_y or data.tileoffset and data.tileoffset.y
-    result.image_width = data.image_width or data.imagewidth
-    result.image_height = data.image_height or data.imageheight
-    result.transparent_color = data.transparent_color or data.transparentcolor
-    if not result.transform_rules and data.transformations then
-        result.transform_rules = {
-            can_hflip = data.transformations.hflip,
-            can_vflip = data.transformations.vflip,
-            can_rotate = data.transformations.rotate,
-            prefer_untransformed = data.transformations.preferuntransformed
-        }
-    end
+    result.alignment = data.alignment
+    result.render_size = data.render_size
+    result.fill_mode = data.fill_mode
+    result.tile_offset_x = data.tile_offset_x
+    result.tile_offset_y = data.tile_offset_y
+    result.image_width = data.image_width
+    result.image_height = data.image_height
+    result.transparent_color = data.transparent_color
     result.properties = nil
     local reason
     result.properties, reason = encodeOwnerProperties(data, { owner = data })
@@ -983,334 +854,7 @@ function EditorFormat.encodeWorld(data, options)
     return EditorFormat.encodeJSON(result, "world", options)
 end
 
--- SECTION : Editor document input 
 
----Returns the current map-editor inputs used to build native data.
----@param document EditorMapDocument
----@param map_id? string
----@return table? context
----@return string? error
-function EditorFormat.getMapContext(document, map_id)
-    map_id = map_id or document.primary_map_id
-    if not map_id then return nil, "Map document has no primary map" end
-    local entry = document.map_lookup and document.map_lookup[map_id]
-    local source_data = Registry.getMapData(map_id)
-    return {
-        id = map_id,
-        document = document,
-        source_data = source_data,
-        layers = document:getEditableLayers(map_id),
-        world = document.world,
-        world_entry = entry,
-        -- Width/height remain grid counts, matching Map and legacy Tiled data.
-        -- These are the reference cell dimensions; tile layers may override them.
-        grid_width = source_data and (source_data.grid_width or source_data.tilewidth),
-        grid_height = source_data and (source_data.grid_height or source_data.tileheight)
-    }
-end
-
----Returns the tileset editor's current working state.
----@param document EditorTilesetDocument
----@return table context
-function EditorFormat.getTilesetContext(document)
-    return {
-        id = document.id,
-        document = document,
-        data = document.data,
-        runtime_tileset = document.tileset
-    }
-end
-
----@return table? data
----@return string? error
-function EditorFormat.buildMapData(document, map_id, options)
-    local context, reason = EditorFormat.getMapContext(document, map_id)
-    if not context then return nil, reason end
-    local data = TableUtils.copy(context.source_data or {}, true)
-    data.id = context.id
-    data.width = data.width or 16
-    data.height = data.height or 12
-    data.grid_width = context.grid_width or data.grid_width or data.tilewidth or 40
-    data.grid_height = context.grid_height or data.grid_height or data.tileheight or 40
-    data.layers = context.layers
-    local reader_class = Registry.getMapReader(context.id)
-    if reader_class and reader_class.LEGACY_FORMAT then
-        return EditorFormat.convertTiledMap(data, options)
-    end
-    return data
-end
-
----@return table? data
----@return string? error
-function EditorFormat.buildTilesetData(document, options)
-    local context = EditorFormat.getTilesetContext(document)
-    local data = TableUtils.copy(context.data or {}, true)
-    data.id = context.id
-    local reader = context.runtime_tileset and context.runtime_tileset.reader
-    if document.virtual or reader and reader.LEGACY_FORMAT then
-        return EditorFormat.convertTiledTileset(data, options)
-    end
-    return data
-end
-
-function EditorFormat.buildWorldData(world, options)
-    local data = TableUtils.copy(world.data or {}, true)
-    data.id = world.id or data.id
-    data.name = world.name or data.name
-    data.properties = world.properties or data.properties or {}
-    data.__editor_property_types = world.__editor_property_types or data.__editor_property_types
-    data.maps = {}
-    for _, entry in ipairs(world.maps or {}) do
-        table.insert(data.maps, { map = entry.id, x = entry.x or 0, y = entry.y or 0 })
-    end
-    return data
-end
-
--- SECTION : Legacy conversion
-
-local function getTiledTilesetId(reference, map_data)
-    if reference.name and Registry.getTileset(reference.name) then return reference.name end
-    local filename = reference.exportfilename or reference.filename
-    if filename then
-        local base_dir = map_data.full_path and FileSystemUtils.getDirname(map_data.full_path) or ""
-        local success, id = TiledUtils.relativePathToAssetId("scripts/world/tilesets", filename, base_dir)
-        if success and Registry.getTileset(id) then return id end
-    end
-    return reference.name
-end
-
-local function getTiledTilesetReferences(map_data)
-    local references = {}
-    for _, source in ipairs(map_data.tilesets or {}) do
-        local id = getTiledTilesetId(source, map_data)
-        local tileset = id and Registry.getTileset(id)
-        table.insert(references, {
-            id = id,
-            first_gid = source.firstgid or 1,
-            columns = tileset and tileset.columns or source.columns,
-            rows = tileset and math.ceil(tileset.tile_count / math.max(1, tileset.columns))
-                or source.columns and math.ceil((source.tilecount or 0) / math.max(1, source.columns)),
-            count = tileset and tileset.id_count or source.tilecount
-        })
-    end
-    table.sort(references, function(a, b) return a.first_gid < b.first_gid end)
-    return references
-end
-
-local function resolveTiledGid(gid, references)
-    local tile_gid, flip_x, flip_y, rotated = TiledUtils.parseTileGid(gid)
-    if tile_gid == 0 then return nil end
-    local reference
-    for _, candidate in ipairs(references) do
-        if candidate.first_gid <= tile_gid then reference = candidate else break end
-    end
-    if not reference or not reference.id then return nil, "Could not resolve Tiled GID " .. tostring(tile_gid) end
-    local tile_id = tile_gid - reference.first_gid
-    if reference.count and tile_id >= reference.count then
-        return nil, string.format("Tiled GID %d is outside tileset '%s'", tile_gid, reference.id)
-    end
-    return reference, EditorFormat.packTile(tile_id, flip_x, flip_y, rotated)
-end
-
-local function iterateTiledLayerTiles(layer, callback)
-    if layer.chunks then
-        for _, chunk in ipairs(layer.chunks) do
-            local width = chunk.width or EditorFormat.CHUNK_SIZE
-            for index, gid in ipairs(chunk.data or {}) do
-                callback((chunk.x or 0) + ((index - 1) % width),
-                    (chunk.y or 0) + math.floor((index - 1) / width), gid)
-            end
-        end
-        return
-    end
-    local width = layer.width or 0
-    for index, gid in ipairs(layer.data or {}) do
-        callback((layer.x or 0) + ((index - 1) % width),
-            (layer.y or 0) + math.floor((index - 1) / width), gid)
-    end
-end
-
-local function convertTiledTileLayer(layer, references)
-    local splits, split_order = {}, {}
-    local function getSplit(reference)
-        local split = splits[reference.id]
-        if split then return split end
-        split = TableUtils.copy(layer, true)
-        clearFields(split, { "data", "encoding", "chunks", "width", "height" })
-        split._editor_type_id = Registry.layer_types:getLegacyTiledType(layer).id
-        split._editor_kind_id = "tile"
-        split.kind = "tile"
-        split.x = layer.offsetx or 0
-        split.y = layer.offsety or 0
-        split.tileset = reference.id
-        split.tileset_columns = reference.columns
-        split.tileset_rows = reference.rows
-        split.chunks = {}
-        split._chunks_by_position = {}
-        splits[reference.id] = split
-        table.insert(split_order, split)
-        return split
-    end
-    local function setTile(split, x, y, packed)
-        local size = EditorFormat.CHUNK_SIZE
-        local chunk_x = math.floor(x / size) * size
-        local chunk_y = math.floor(y / size) * size
-        local key = chunk_x .. ":" .. chunk_y
-        local chunk = split._chunks_by_position[key]
-        if not chunk then
-            chunk = { x = chunk_x, y = chunk_y, tile_data = {} }
-            for index = 1, size * size do chunk.tile_data[index] = 0 end
-            split._chunks_by_position[key] = chunk
-            table.insert(split.chunks, chunk)
-        end
-        chunk.tile_data[(x - chunk_x) + (y - chunk_y) * size + 1] = packed
-    end
-
-    local conversion_error
-    iterateTiledLayerTiles(layer, function(x, y, gid)
-        if conversion_error or gid == 0 then return end
-        local reference, packed = resolveTiledGid(gid, references)
-        if not reference then conversion_error = packed return end
-        setTile(getSplit(reference), x, y, packed)
-    end)
-    if conversion_error then return nil, conversion_error end
-    if #split_order == 0 and references[1] then getSplit(references[1]) end
-    if #split_order == 0 then return nil, "Tile layer has no resolvable tileset" end
-
-    for index, split in ipairs(split_order) do
-        split._chunks_by_position = nil
-        table.sort(split.chunks, function(a, b) return a.y == b.y and a.x < b.x or a.y < b.y end)
-        if #split_order > 1 then
-            split.name = index == 1 and layer.name or string.format("%s [%s]", layer.name or "Tiles", split.tileset)
-            split.id = index == 1 and layer.id or tostring(layer.id or "layer") .. ":" .. split.tileset
-            split.properties = TableUtils.copy(layer.properties or {}, true)
-            if index < #split_order then split.properties.thin = true end
-        end
-    end
-    return split_order
-end
-
----@return table? data
----@return string? error
-function EditorFormat.convertTiledMap(data, options)
-    local converted = TableUtils.copy(data, true)
-    converted.version = EditorFormat.TILED_MAP_CONVERSION_VERSION
-    converted.kristal_version = tostring(Kristal.Version)
-    converted.grid_width = data.tilewidth or 40
-    converted.grid_height = data.tileheight or 40
-    converted.background_color = data.backgroundcolor
-    converted.name = converted.name or converted.properties and converted.properties.name
-    if converted.properties then
-        converted.properties.name = nil
-        converted.properties.keep_music = converted.properties.keep_music or converted.properties.keepmusic
-        converted.properties.keepmusic = nil
-    end
-    converted.tilewidth, converted.tileheight, converted.backgroundcolor = nil, nil, nil
-    local references = getTiledTilesetReferences(data)
-    local function convertLayers(layers)
-        local result = {}
-        for _, layer in ipairs(layers or {}) do
-            if layer.type == "group" then
-                layer._editor_type_id = "folder"
-                layer._editor_kind_id = "group"
-                layer.kind = "group"
-                layer.x = layer.offsetx or 0
-                layer.y = layer.offsety or 0
-                layer.layers = convertLayers(layer.layers)
-                table.insert(result, layer)
-            elseif layer.type == "tilelayer" then
-                local split_layers, reason = convertTiledTileLayer(layer, references)
-                if not split_layers then return nil, reason end
-                for _, split in ipairs(split_layers) do table.insert(result, split) end
-            else
-                local layer_type = Registry.layer_types:getLegacyTiledType(layer)
-                layer._editor_type_id = layer_type.id
-                layer._editor_kind_id = layer_type.kind
-                layer.kind = layer_type.kind
-                layer.x = layer.offsetx or 0
-                layer.y = layer.offsety or 0
-                table.insert(result, layer)
-            end
-        end
-        return result
-    end
-    local converted_layers, reason = convertLayers(converted.layers)
-    if not converted_layers then return nil, reason end
-    converted.layers = converted_layers
-    return EditorFormat.migrateMap(converted)
-end
-
----@return table? data
----@return string? error
-function EditorFormat.convertTiledTileset(data, options)
-    local converted = TableUtils.copy(data, true)
-    converted.version = EditorFormat.TILED_TILESET_CONVERSION_VERSION
-    converted.kristal_version = tostring(Kristal.Version)
-    converted.tile_width = data.tilewidth
-    converted.tile_height = data.tileheight
-    converted.tile_count = data.tilecount
-    converted.tile_columns = data.columns
-    converted.tile_rows = data.columns and data.columns > 0 and math.ceil((data.tilecount or 0) / data.columns) or 0
-    converted.alignment = data.objectalignment
-    converted.render_size = data.tilerendersize
-    converted.fill_mode = data.fillmode
-    converted.tile_offset_x = data.tileoffset and data.tileoffset.x
-    converted.tile_offset_y = data.tileoffset and data.tileoffset.y
-    if data.transformations then
-        converted.transform_rules = {
-            can_hflip = data.transformations.hflip,
-            can_vflip = data.transformations.vflip,
-            can_rotate = data.transformations.rotate,
-            prefer_untransformed = data.transformations.preferuntransformed
-        }
-    end
-    if not data.image and (data.tilecount or 0) > 0 then
-        local images = {}
-        for _, tile in ipairs(data.tiles or {}) do
-            if tile.image then images[tile.id + 1] = tile.image end
-        end
-        if next(images) then
-            for index = 1, data.tilecount do
-                if images[index] == nil then
-                    return nil, "Multi-image legacy tilesets require one image for every tile id"
-                end
-            end
-            converted.image = images
-        end
-    end
-    converted.terrains = {}
-    for terrain_index, wangset in ipairs(data.wangsets or {}) do
-        local terrain = {
-            id = wangset.id or terrain_index,
-            name = wangset.name,
-            tile_icon = wangset.tile and wangset.tile >= 0 and wangset.tile or nil,
-            type = wangset.type or "mixed",
-            properties = TableUtils.copy(wangset.properties or {}, true),
-            __editor_property_types = TableUtils.copy(wangset.__editor_property_types or {}, true),
-            terrain_variants = {},
-            terrain_tiles = {}
-        }
-        for variant_index, color in ipairs(wangset.wangcolors or wangset.colors or {}) do
-            table.insert(terrain.terrain_variants, {
-                id = variant_index,
-                name = color.name,
-                color = color.color,
-                tile_icon = color.tile and color.tile >= 0 and color.tile or nil,
-                probability = color.probability,
-                properties = TableUtils.copy(color.properties or {}, true),
-                __editor_property_types = TableUtils.copy(color.__editor_property_types or {}, true)
-            })
-        end
-        for _, wangtile in ipairs(wangset.wangtiles or {}) do
-            table.insert(terrain.terrain_tiles, {
-                tile_id = wangtile.tileid,
-                edges = TableUtils.copy(wangtile.wangid or {}, true)
-            })
-        end
-        table.insert(converted.terrains, terrain)
-    end
-    return EditorFormat.migrateTileset(converted)
-end
 
 local function checkVersion(data, label, current_version)
     local version = tonumber(data.version)
@@ -1406,6 +950,15 @@ function EditorFormat.validateTileset(data, options)
                 object_ids[object.id] = true
             end
         end
+        for frame_index, frame in ipairs(tile.frames or {}) do
+            local path = string.format("tiles[%d].frames[%d]", tile_index, frame_index)
+            if type(frame.tile_id) ~= "number" or frame.tile_id < 0 or frame.tile_id % 1 ~= 0 then
+                table.insert(diagnostics, path .. ".tile_id must be a non-negative integer")
+            end
+            if type(frame.duration) ~= "number" or frame.duration <= 0 then
+                table.insert(diagnostics, path .. ".duration must be positive milliseconds")
+            end
+        end
     end
     local terrain_ids = {}
     for terrain_index, terrain in ipairs(data.terrains or {}) do
@@ -1482,103 +1035,6 @@ function EditorFormat.writeFile(path, encoded, options)
     return true
 end
 
-local function normalizeProjectPath(path)
-    path = tostring(path or ""):gsub("\\", "/"):gsub("/+", "/")
-    if path == "" or path:sub(1, 1) == "/" or path:match("^%a:/") then
-        return nil, "Project save paths must be relative"
-    end
-    for segment in path:gmatch("[^/]+") do
-        if segment == "." or segment == ".." then return nil, "Project save path escapes the project" end
-    end
-    return path
-end
 
-local function quoteDirectory(path)
-    if love.system.getOS() == "Windows" then
-        if path:find('[%%!\"]') then return nil end
-        return '"' .. path:gsub("/", "\\") .. '"'
-    end
-    return "'" .. path:gsub("'", "'\\''") .. "'"
-end
-
-local function createRealDirectory(path)
-    local quoted = quoteDirectory(path)
-    if not quoted then return false, "Project directory contains unsupported shell characters" end
-    local command = love.system.getOS() == "Windows"
-        and ("mkdir " .. quoted .. " >NUL 2>NUL")
-        or ("mkdir -p " .. quoted .. " >/dev/null 2>&1")
-    os.execute(command)
-    local probe = io.open(path .. "/.kristal_editor_write_probe", "wb")
-    if not probe then return false, "Could not create project directory '" .. path .. "'" end
-    probe:close()
-    os.remove(path .. "/.kristal_editor_write_probe")
-    return true
-end
-
-function EditorFormat.getProjectRealPath(path)
-    local normalized, reason = normalizeProjectPath(path)
-    if not normalized then return nil, reason end
-    if not Mod or not Mod.info or not Mod.info.path then return nil, "No project is loaded" end
-    local project_path = Mod.info.path:gsub("\\", "/"):gsub("/+$", "")
-    if normalized ~= project_path and not StringUtils.startsWith(normalized, project_path .. "/") then
-        return nil, "Save path is outside the active project"
-    end
-    local real_root = love.filesystem.getRealDirectory(project_path)
-    if not real_root then return nil, "Could not locate the active project on disk" end
-    return (real_root:gsub("\\", "/"):gsub("/+$", "")) .. "/" .. normalized
-end
-
-function EditorFormat.writeProjectFile(path, encoded)
-    local real_path, reason = EditorFormat.getProjectRealPath(path)
-    if not real_path then return false, reason end
-    local directory = FileSystemUtils.getDirname(real_path)
-    local created
-    created, reason = createRealDirectory(directory)
-    if not created then return false, reason end
-
-    local temporary = real_path .. ".kristal-tmp"
-    local backup = real_path .. ".kristal-backup"
-    local file, open_error = io.open(temporary, "wb")
-    if not file then return false, open_error or ("Could not open '" .. temporary .. "'") end
-    local written, write_error = file:write(encoded)
-    local closed, close_error = file:close()
-    if not written or not closed then
-        os.remove(temporary)
-        return false, write_error or close_error or "Could not finish writing project file"
-    end
-
-    os.remove(backup)
-    local existing = io.open(real_path, "rb")
-    if existing then
-        existing:close()
-        local moved, move_error = os.rename(real_path, backup)
-        if not moved then os.remove(temporary) return false, move_error end
-    end
-    local replaced, replace_error = os.rename(temporary, real_path)
-    if not replaced then
-        os.rename(backup, real_path)
-        os.remove(temporary)
-        return false, replace_error or "Could not replace project file"
-    end
-    os.remove(backup)
-    return true
-end
-
-function EditorFormat.saveMapDocument(document, path, options, map_id)
-    local data, reason = EditorFormat.buildMapData(document, map_id, options)
-    if not data then return false, reason end
-    return EditorFormat.saveMapData(data, path, options)
-end
-
-function EditorFormat.saveTilesetDocument(document, path, options)
-    local data, reason = EditorFormat.buildTilesetData(document, options)
-    if not data then return false, reason end
-    return EditorFormat.saveTilesetData(data, path, options)
-end
-
-function EditorFormat.saveWorld(world, path, options)
-    local data = EditorFormat.buildWorldData(world, options)
-    return EditorFormat.saveWorldData(data, path, options)
-end
 
 return EditorFormat

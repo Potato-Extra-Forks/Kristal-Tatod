@@ -122,12 +122,7 @@ function EditorTilesetPanel:getItemTarget(item)
     item.__editor_property_types = item.__editor_property_types or {}
     local set = EditorPropertySet(item.properties, item.__editor_property_types)
     local function field(label, key, numeric)
-        return { label = label, compact = numeric == true,
-            get = function() return item[key] or (numeric and 0 or "") end,
-            set = function(value)
-                if numeric then value = tonumber(value) if not value then return false end end
-                item[key] = value return true
-            end }
+        return EditorPropertyFields.value(item, label, key, { numeric = numeric == true })
     end
     local fields, title = {}, "Tileset Item"
     if self.mode == "terrain" then
@@ -236,6 +231,13 @@ function EditorTilesetPanel:drawSelf()
     if self.list.visible then
         love.graphics.line(self.properties.x + 0.5, self.properties.y,
             self.properties.x + 0.5, self.height)
+    end
+    if self.mode == "terrain" then
+        local lancer = Assets.getTexture("kristal/lancer_construction")
+        Draw.setColor(1,1,1,1)
+        Draw.draw(lancer, 108, 38, 0, 2, 2)
+        Draw.setColor(COLORS.yellow)
+        love.graphics.print("! UNDER CONSTRUCTION !", 168, 48)
     end
 end
 

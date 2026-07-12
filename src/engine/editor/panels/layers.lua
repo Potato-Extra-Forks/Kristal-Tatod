@@ -2,25 +2,6 @@
 ---@overload fun(editor: table): EditorLayersPanel
 local EditorLayersPanel, super = Class(EditorControl)
 
-local function colorToHex(color)
-    local function byte(value)
-        return MathUtils.clamp(MathUtils.round((value or 1) * 255), 0, 255)
-    end
-    return string.format("#%02X%02X%02X%02X", byte(color[1]), byte(color[2]), byte(color[3]), byte(color[4]))
-end
-
-local function hexToColor(value)
-    local hex = tostring(value or ""):gsub("^#", "")
-    if #hex ~= 6 and #hex ~= 8 or not hex:match("^[%da-fA-F]+$") then return nil end
-    if #hex == 6 then hex = hex .. "FF" end
-    return {
-        tonumber(hex:sub(1, 2), 16) / 255,
-        tonumber(hex:sub(3, 4), 16) / 255,
-        tonumber(hex:sub(5, 6), 16) / 255,
-        tonumber(hex:sub(7, 8), 16) / 255
-    }
-end
-
 function EditorLayersPanel:init(editor)
     super.init(self, 0, 0, 300, 500)
     self.editor = editor
@@ -214,7 +195,7 @@ function EditorLayersPanel:getPropertiesTarget(layer)
                 label = "Color",
                 compact = true,
                 placeholder = "#RRGGBBAA",
-                get = function() return colorToHex(self:getLayerColor(layer)) end,
+                get = function() return ColorUtils.RGBAToHex(self:getLayerColor(layer)) end,
                 set = function(value) return self:setLayerColor(layer, value) end
             },
             {
@@ -266,7 +247,7 @@ end
 
 function EditorLayersPanel:setLayerColor(layer, value)
     if not layer then return false end
-    local color = hexToColor(value)
+    local color = ColorUtils.tryHexToRGB(value)
     if color then
         layer.color = color
         self.editor:clearDiagnostics("layer_color")

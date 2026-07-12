@@ -62,7 +62,7 @@ function EditorLayerOverlay:drawObject(object, alpha)
         if object.polygon and #coordinates >= 6 then
             love.graphics.polygon("line", coordinates)
         elseif #coordinates >= 4 then
-            for _, edge in ipairs(TiledUtils.getPolylineEdges(object, #points)) do
+            for _, edge in ipairs(MapUtils.getPolylineEdges(object, #points)) do
                 local first, second = points[edge[1]], points[edge[2]]
                 local x1, y1 = pointCoordinates(first)
                 local x2, y2 = pointCoordinates(second)

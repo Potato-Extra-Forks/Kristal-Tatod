@@ -46,7 +46,7 @@ function EditorTilesetReader:initialize(data, path, base_dir)
         if tile.frames or tile.animation then
             info.animation = { duration = 0, frames = {} }
             for _, frame in ipairs(tile.frames or tile.animation) do
-                local duration = frame.duration or 0
+                local duration = (frame.duration or 0) / EditorFormat.MILLISECONDS_PER_SECOND
                 table.insert(info.animation.frames, { id = frame.tile_id or frame.tileid, duration = duration })
                 info.animation.duration = info.animation.duration + duration
             end
@@ -92,17 +92,11 @@ end
 function EditorTilesetReader.operations.loadTextureFromImagePath(tileset, filename)
     local texture, resolved_id = Assets.resolveTextureReference(filename)
     if texture then return true, resolved_id end
-    local success, relative_id, final_path = TiledUtils.relativePathToAssetId(
-        "assets/sprites", filename, tileset.base_dir)
-    if success then
-        texture, resolved_id = Assets.resolveTextureReference(relative_id)
-        if texture then return true, resolved_id end
-    end
-    return false, "Could not resolve tileset image path '" .. tostring(final_path or filename) .. "'"
+    return false, "Could not resolve tileset image asset '" .. tostring(filename) .. "'"
 end
 
 function EditorTilesetReader.convertLegacyData(data, options)
-    return EditorFormat.convertTiledTileset(data, options)
+    return TiledEditorFormatConverter.convertTileset(data, options)
 end
 
 function EditorTilesetReader.saveData(data, path, options)

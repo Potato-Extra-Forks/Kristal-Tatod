@@ -38,36 +38,12 @@ local function setupLayerProperties(layer)
         layer._editor_property_types = layer._editor_property_types or {}
         properties = EditorPropertySet(layer.properties, layer._editor_property_types)
     end
-    properties:registerProperty("thin", "boolean")
-    if layer._editor_type_id == "objects" then properties:registerProperty("spawn", "boolean") end
-    if layer._editor_type_id == "image" then
-        properties:registerProperty("speedx", "number", { name = "Speed X" })
-        properties:registerProperty("speedy", "number", { name = "Speed Y" })
-        properties:registerProperty("wrapx", "boolean", { name = "Wrap X" })
-        properties:registerProperty("wrapy", "boolean", { name = "Wrap Y" })
-        properties:registerProperty("fitscreen", "boolean", { name = "Fit Screen" })
-        properties:registerProperty("scalex", "number", { name = "Scale X", default = 1 })
-        properties:registerProperty("scaley", "number", { name = "Scale Y", default = 1 })
-    end
+    Registry.layer_types:initializeLayerProperties(layer, properties)
     layer._editor_property_set = properties
 end
 
-local function walkLayers(layers, callback, depth, parent)
-    depth = depth or 0
-    for index, layer in ipairs(layers or {}) do
-        callback(layer, depth, parent, layers, index)
-        if layer.layers then walkLayers(layer.layers, callback, depth + 1, layer) end
-    end
-end
-
-local function walkObjects(layers, callback)
-    walkLayers(layers, function(layer)
-        for _, object in ipairs(layer.objects or {}) do callback(object, layer) end
-    end)
-end
-
 local function stripLayerRuntimeState(layers)
-    walkLayers(layers, function(layer) layer._editor_property_set = nil end)
+    MapUtils.walkLayers(layers, function(layer) layer._editor_property_set = nil end)
 end
 
 function EditorMapDocument:init(editor, map_id)
@@ -127,7 +103,7 @@ function EditorMapDocument:restoreHistoryState(state)
     self.maps, self.map_lookup = world.maps, world.map_lookup
     self.editable_layers = TableUtils.copy(state.editable_layers or {}, true)
     for _, layers in pairs(self.editable_layers) do
-        walkLayers(layers, setupLayerProperties)
+        MapUtils.walkLayers(layers, setupLayerProperties)
     end
     self.selected_layers = TableUtils.copy(state.selected_layers or {}, true)
     self.next_layer_uid = state.next_layer_uid or 1
@@ -143,15 +119,15 @@ function EditorMapDocument:isDirty()
 end
 
 function EditorMapDocument:getFormatContext(map_id)
-    return EditorFormat.getMapContext(self, map_id)
+    return EditorFormatDocument.getMapContext(self, map_id)
 end
 
 function EditorMapDocument:buildEditorFormatData(map_id, options)
-    return EditorFormat.buildMapData(self, map_id, options)
+    return EditorFormatDocument.buildMapData(self, map_id, options)
 end
 
 function EditorMapDocument:save(path, options, map_id)
-    return EditorFormat.saveMapDocument(self, path, options, map_id)
+    return EditorFormatDocument.saveMap(self, path, options, map_id)
 end
 
 function EditorMapDocument:adoptSavedMapData(id, data)
@@ -170,7 +146,7 @@ function EditorMapDocument:getEditableLayers(id)
         local legacy = reader_class and reader_class.LEGACY_FORMAT
         local layers = legacy and flattenLayers(data and data.layers or {})
             or TableUtils.copy(data and data.layers or {}, true)
-        walkLayers(layers, function(layer)
+        MapUtils.walkLayers(layers, function(layer)
             layer._editor_uid = self.next_layer_uid
             self.next_layer_uid = self.next_layer_uid + 1
             layer.properties = layer.properties or {}
@@ -186,7 +162,7 @@ function EditorMapDocument:getEditableLayers(id)
             end
             setupLayerProperties(layer)
         end)
-        walkObjects(layers, function(object)
+        MapUtils.walkObjects(layers, function(object)
             local object_id = tonumber(object.id)
             if object_id and object_id >= 1 and object_id % 1 == 0 then
                 self.next_object_uid = math.max(self.next_object_uid, object_id + 1)
@@ -222,7 +198,7 @@ end
 
 function EditorMapDocument:findEditableLayer(uid, id)
     local found, found_parent, found_list, found_index
-    walkLayers(self:getEditableLayers(id), function(layer, _, parent, list, index)
+    MapUtils.walkLayers(self:getEditableLayers(id), function(layer, _, parent, list, index)
         if not found and layer._editor_uid == uid then
             found, found_parent, found_list, found_index = layer, parent, list, index
         end
@@ -348,7 +324,7 @@ function EditorMapDocument:moveEditableLayer(uid, target_index, id, parent_uid)
         if not parent or parent._editor_kind_id ~= "group" then return false end
         -- A group cannot become its own descendant.
         local descendant = false
-        walkLayers(layer.layers or {}, function(candidate)
+        MapUtils.walkLayers(layer.layers or {}, function(candidate)
             if candidate == parent then descendant = true end
         end)
         if descendant or parent == layer then return false end
@@ -980,7 +956,7 @@ function EditorMapDocument:findObjectAt(world_x, world_y)
                         hit = false
                         local thickness = object.shape_data and tonumber(object.shape_data.thickness) or 0
                         local tolerance = math.max(10, thickness / 2 + 4)
-                        for _, edge in ipairs(TiledUtils.getPolylineEdges(object, #object.polyline)) do
+                        for _, edge in ipairs(MapUtils.getPolylineEdges(object, #object.polyline)) do
                             local first, second = object.polyline[edge[1]], object.polyline[edge[2]]
                             local x1, y1 = first.x or first[1] or 0, first.y or first[2] or 0
                             local x2, y2 = second.x or second[1] or 0, second.y or second[2] or 0

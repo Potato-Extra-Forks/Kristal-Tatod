@@ -21,6 +21,20 @@ local function mapLoader(method)
     end)
 end
 
+local function objectProperties(properties)
+    properties:registerProperty("spawn", "boolean")
+end
+
+local function imageProperties(properties)
+    properties:registerProperty("speedx", "number", { name = "Speed X" })
+    properties:registerProperty("speedy", "number", { name = "Speed Y" })
+    properties:registerProperty("wrapx", "boolean", { name = "Wrap X" })
+    properties:registerProperty("wrapy", "boolean", { name = "Wrap Y" })
+    properties:registerProperty("fitscreen", "boolean", { name = "Fit Screen" })
+    properties:registerProperty("scalex", "number", { name = "Scale X", default = 1 })
+    properties:registerProperty("scaley", "number", { name = "Scale Y", default = 1 })
+end
+
 local DEFAULT_KINDS = {
     {
         id = "group",
@@ -76,8 +90,8 @@ local DEFAULT_TYPES = {
     { id = "default",        name = "Unknown",         kind = "object", icon = "editor/ui/layer/default",        color = { 0.8, 0.8, 0.82, 1 }, load = objectLoader() },
     { id = "folder",         name = "Folder",          kind = "group",  icon = "editor/ui/layer/default",        color = { 1, 1, 1, 1 } },
     { id = "tile",           name = "Tiles",           kind = "tile",   icon = "editor/ui/layer/tile",           color = { 0.8, 0.8, 0.82, 1 } },
-    { id = "image",          name = "Image",           kind = "image",  icon = "editor/ui/layer/image",          color = { 0.8, 0.8, 0.82, 1 } },
-    { id = "objects",        name = "Objects",         kind = "object", icon = "editor/ui/layer/objects",        color = { 0, 1, 1, 1 },       load = eventLoader("events") },
+    { id = "image",          name = "Image",           kind = "image",  icon = "editor/ui/layer/image",          color = { 0.8, 0.8, 0.82, 1 }, properties = imageProperties },
+    { id = "objects",        name = "Objects",         kind = "object", icon = "editor/ui/layer/objects",        color = { 0, 1, 1, 1 },       load = eventLoader("events"), properties = objectProperties },
     { id = "controllers",    name = "Controllers",     kind = "object", icon = "editor/ui/layer/controllers",    color = { 0.72, 0.48, 1, 1 }, load = eventLoader("controllers") },
     { id = "markers",        name = "Markers",         kind = "object", icon = "editor/ui/layer/markers",        color = { 1, 0.82, 0.16, 1 }, load = mapLoader("loadMarkers") },
     { id = "collision",      name = "Collision",       kind = "object", icon = "editor/ui/layer/collision",      color = { 0, 0, 1, 1 },       load = mapLoader("loadCollision") },
@@ -187,6 +201,21 @@ end
 
 function LayerTypeRegistry:get(id)
     return self.types[id]
+end
+
+function LayerTypeRegistry:getLayerKind(layer)
+    local kind = layer and (layer._editor_kind_id or layer.kind)
+    if kind then return kind end
+    local layer_type = layer and self:get(layer._editor_type_id or layer.type)
+    return layer_type and layer_type.kind or "object"
+end
+
+function LayerTypeRegistry:initializeLayerProperties(layer, properties)
+    properties:registerProperty("thin", "boolean")
+    local kind = self:getKind(self:getLayerKind(layer))
+    if kind and kind.properties then kind.properties(properties, layer, kind) end
+    local layer_type = self:get(layer._editor_type_id or layer.type)
+    if layer_type and layer_type.properties then layer_type.properties(properties, layer, layer_type) end
 end
 
 function LayerTypeRegistry:getAll()
